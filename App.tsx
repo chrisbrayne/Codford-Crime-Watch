@@ -7,7 +7,7 @@ import CrimeMap from './components/CrimeMap';
 import CrimeChart from './components/CrimeChart';
 import EmbedModal from './components/EmbedModal';
 import ReactMarkdown from 'react-markdown';
-import { ShieldAlert, MapPin, Calendar, Loader2, FileText, BarChart3, Info, Code } from 'lucide-react';
+import { ShieldAlert, MapPin, Calendar, Loader2, FileText, BarChart3, Info, Code, Filter, Copy, Check, AlertTriangle, ExternalLink } from 'lucide-react';
 
 // Helper to format YYYY-MM to MMM YYYY (e.g. "2024-03" -> "Mar 2024")
 const formatDate = (dateStr: string) => {
@@ -26,6 +26,11 @@ const App: React.FC = () => {
   const [aiReport, setAiReport] = useState<string | null>(null);
   const [generatingReport, setGeneratingReport] = useState<boolean>(false);
   const [showEmbedModal, setShowEmbedModal] = useState<boolean>(false);
+  
+  // Refinement States
+  const [selectedCategory, setSelectedCategory] = useState<string>('all');
+  const [hoveredCrimeId, setHoveredCrimeId] = useState<number | null>(null);
+  const [reportCopied, setReportCopied] = useState<boolean>(false);
 
   useEffect(() => {
     const initData = async () => {
@@ -56,7 +61,7 @@ const App: React.FC = () => {
     initData();
   }, []);
 
-  // Calculate Summary
+  // Calculate Summary (Always based on ALL crimes for context)
   const summary: CrimeSummary = useMemo(() => {
     const counts: Record<string, number> = {};
     crimes.forEach(c => {
@@ -77,6 +82,17 @@ const App: React.FC = () => {
     };
   }, [crimes]);
 
+  // Derived state for Filtering
+  const filteredCrimes = useMemo(() => {
+    if (selectedCategory === 'all') return crimes;
+    return crimes.filter(c => c.category === selectedCategory);
+  }, [crimes, selectedCategory]);
+
+  const uniqueCategories = useMemo(() => {
+    const cats = new Set(crimes.map(c => c.category));
+    return Array.from(cats).sort();
+  }, [crimes]);
+
   // Trigger AI Report
   useEffect(() => {
     if (!loading && crimes.length >= 0 && summary && reportDate && !aiReport && !generatingReport) {
@@ -88,6 +104,13 @@ const App: React.FC = () => {
     }
   }, [loading, crimes, summary, reportDate, aiReport, generatingReport]);
 
+  const handleCopyReport = () => {
+    if (aiReport) {
+      navigator.clipboard.writeText(aiReport);
+      setReportCopied(true);
+      setTimeout(() => setReportCopied(false), 2000);
+    }
+  };
 
   if (error) {
     return (
@@ -140,6 +163,36 @@ const App: React.FC = () => {
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 flex-grow w-full">
         
+        {/* Prominent Reporting Notice */}
+        <div className="bg-amber-50 border-l-4 border-amber-500 p-6 mb-8 rounded-r-xl shadow-sm flex flex-col sm:flex-row items-start sm:items-center gap-4">
+           <div className="bg-amber-100 p-3 rounded-full shrink-0">
+              <AlertTriangle className="w-6 h-6 text-amber-700" />
+           </div>
+           <div className="flex-grow">
+              <h3 className="text-lg font-bold text-amber-900 mb-1">Help Protect Our Community: Report Every Incident</h3>
+              <p className="text-amber-800 text-sm mb-3 max-w-3xl">
+                Accurate crime data is essential for effective policing in Codford. If incidents aren't reported, they don't appear in these statistics or influence police resource allocation.
+              </p>
+              <div className="flex flex-wrap items-center gap-4 text-sm font-medium">
+                  <span className="text-amber-900">
+                    <span className="font-bold">Emergency:</span> 999
+                  </span>
+                  <span className="text-amber-900">
+                     <span className="font-bold">Non-Emergency:</span> 101
+                  </span>
+                  <a 
+                    href="https://www.wiltshire.police.uk/ro/report/ocr/af/how-to-report-a-crime/" 
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                    className="flex items-center space-x-1 text-blue-700 bg-white border border-blue-200 px-3 py-1.5 rounded-full hover:bg-blue-50 transition-colors shadow-sm"
+                  >
+                    <span>Report Online via Wiltshire Police</span>
+                    <ExternalLink className="w-3 h-3" />
+                  </a>
+              </div>
+           </div>
+        </div>
+
         {loading ? (
            <div className="flex flex-col items-center justify-center h-[60vh] space-y-4">
               <Loader2 className="w-10 h-10 text-blue-600 animate-spin" />
@@ -190,7 +243,19 @@ const App: React.FC = () => {
                     <FileText className="w-5 h-5" />
                     <h2 className="font-semibold text-lg">Activity Summary</h2>
                   </div>
-                  {generatingReport && <Loader2 className="w-5 h-5 text-white/80 animate-spin" />}
+                  <div className="flex items-center space-x-3">
+                    {generatingReport && <Loader2 className="w-5 h-5 text-white/80 animate-spin" />}
+                    {!generatingReport && aiReport && (
+                      <button 
+                        onClick={handleCopyReport}
+                        className="flex items-center space-x-1 text-xs bg-white/10 hover:bg-white/20 text-white px-2 py-1 rounded transition-colors"
+                        title="Copy report markdown to clipboard"
+                      >
+                         {reportCopied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                         <span>{reportCopied ? 'Copied' : 'Copy Text'}</span>
+                      </button>
+                    )}
+                  </div>
                </div>
                <div className="p-8 prose prose-slate max-w-none">
                   {generatingReport ? (
@@ -205,33 +270,68 @@ const App: React.FC = () => {
                </div>
             </div>
 
-            {/* Visuals Grid */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-              <div className="space-y-4">
-                <h3 className="text-lg font-semibold text-slate-800 flex items-center space-x-2">
+            {/* Filter Controls */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+               <h3 className="text-lg font-semibold text-slate-800 flex items-center space-x-2">
                   <MapPin className="w-5 h-5 text-slate-500" />
                   <span>Geographic Distribution</span>
                 </h3>
-                {boundary && <CrimeMap boundary={boundary} crimes={crimes} />}
+                
+                <div className="flex items-center space-x-2">
+                   <Filter className="w-4 h-4 text-slate-500" />
+                   <select 
+                      value={selectedCategory}
+                      onChange={(e) => setSelectedCategory(e.target.value)}
+                      className="bg-white border border-slate-300 text-slate-700 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block p-2"
+                   >
+                      <option value="all">All Categories</option>
+                      {uniqueCategories.map(cat => (
+                         <option key={cat} value={cat}>
+                           {cat.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                         </option>
+                      ))}
+                   </select>
+                </div>
+            </div>
+
+            {/* Visuals Grid */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+              <div className="space-y-4">
+                {boundary && (
+                  <CrimeMap 
+                    boundary={boundary} 
+                    crimes={filteredCrimes} 
+                    hoveredCrimeId={hoveredCrimeId}
+                  />
+                )}
                 <p className="text-xs text-slate-400">
                   *Map visualizes crime locations relative to the Codford Civil Parish boundary. 
                   Red dots represent approximate locations provided by police.uk.
+                  Hover over the Incident Log to highlight locations.
                 </p>
               </div>
 
               <div className="space-y-4">
-                <h3 className="text-lg font-semibold text-slate-800 flex items-center space-x-2">
-                  <BarChart3 className="w-5 h-5 text-slate-500" />
-                  <span>Category Breakdown</span>
-                </h3>
+                 <div className="flex items-center justify-between">
+                    <h3 className="text-lg font-semibold text-slate-800 flex items-center space-x-2">
+                      <BarChart3 className="w-5 h-5 text-slate-500" />
+                      <span>Category Breakdown</span>
+                    </h3>
+                    <span className="text-xs text-slate-400 bg-slate-100 px-2 py-1 rounded">
+                      Total: {summary.total}
+                    </span>
+                 </div>
                 <CrimeChart summary={summary} />
               </div>
             </div>
 
-            {/* Raw Data Table (Optional but useful for transparency) */}
+            {/* Raw Data Table */}
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-              <div className="px-6 py-4 border-b border-slate-100 bg-slate-50">
+              <div className="px-6 py-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
                 <h3 className="font-semibold text-slate-800">Incident Log</h3>
+                <span className="text-xs text-slate-500">
+                  {filteredCrimes.length} {filteredCrimes.length === 1 ? 'incident' : 'incidents'} shown
+                </span>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-sm text-slate-600">
@@ -245,21 +345,44 @@ const App: React.FC = () => {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {crimes.map((crime) => (
-                      <tr key={crime.id} className="hover:bg-slate-50 transition-colors">
+                    {filteredCrimes.map((crime) => (
+                      <tr 
+                        key={crime.id} 
+                        className={`transition-colors cursor-default ${
+                          hoveredCrimeId === crime.id ? 'bg-blue-50' : 'hover:bg-slate-50'
+                        }`}
+                        onMouseEnter={() => setHoveredCrimeId(crime.id)}
+                        onMouseLeave={() => setHoveredCrimeId(null)}
+                      >
                         <td className="px-6 py-3 whitespace-nowrap">{formatDate(crime.month)}</td>
-                        <td className="px-6 py-3 capitalize">{crime.category.replace(/-/g, ' ')}</td>
-                        <td className="px-6 py-3">{crime.location.street.name}</td>
+                        <td className="px-6 py-3 capitalize">
+                           <span className={`inline-block px-2 py-0.5 rounded text-xs border ${
+                             crime.category === 'anti-social-behaviour' ? 'bg-amber-50 text-amber-700 border-amber-200' :
+                             crime.category.includes('violent') ? 'bg-red-50 text-red-700 border-red-200' :
+                             'bg-slate-100 text-slate-600 border-slate-200'
+                           }`}>
+                            {crime.category.replace(/-/g, ' ')}
+                           </span>
+                        </td>
+                        <td className="px-6 py-3 font-medium text-slate-700">{crime.location.street.name}</td>
                         <td className="px-6 py-3">{crime.outcome_status?.category || 'Status unavailable'}</td>
                         <td className="px-6 py-3 whitespace-nowrap">
                           {crime.outcome_status?.date ? formatDate(crime.outcome_status.date) : '-'}
                         </td>
                       </tr>
                     ))}
-                    {crimes.length === 0 && (
+                    {filteredCrimes.length === 0 && (
                        <tr>
-                        <td colSpan={5} className="px-6 py-8 text-center text-slate-400">
-                          No crimes recorded for this period.
+                        <td colSpan={5} className="px-6 py-12 text-center text-slate-400">
+                          <p>No crimes recorded matching your selection.</p>
+                          {selectedCategory !== 'all' && (
+                            <button 
+                              onClick={() => setSelectedCategory('all')}
+                              className="mt-2 text-blue-600 hover:underline text-sm"
+                            >
+                              Clear filters
+                            </button>
+                          )}
                         </td>
                       </tr>
                     )}
