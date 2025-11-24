@@ -1,0 +1,5 @@
+{
+  "name": "Codford Crime Watch",
+  "description": "A monthly crime report generator for the Civil Parish of Codford using ONS geography and Police.uk data, enhanced with Gemini analysis.",
+  "requestFramePermissions": []
+}
