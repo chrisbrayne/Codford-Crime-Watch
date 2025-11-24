@@ -108,10 +108,10 @@ const App: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 font-sans pb-12">
+    <div className="min-h-screen bg-slate-50 text-slate-900 font-sans flex flex-col">
       
       {/* Header */}
-      <header className="bg-slate-900 text-white shadow-lg sticky top-0 z-50">
+      <header className="bg-slate-900 text-white shadow-lg sticky top-0 z-50 shrink-0">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
           <div className="flex items-center space-x-3">
             <ShieldAlert className="w-6 h-6 text-blue-400" />
@@ -138,7 +138,7 @@ const App: React.FC = () => {
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 flex-grow w-full">
         
         {loading ? (
            <div className="flex flex-col items-center justify-center h-[60vh] space-y-4">
@@ -271,6 +271,43 @@ const App: React.FC = () => {
           </div>
         )}
       </main>
+
+      {!loading && (
+        <footer className="bg-slate-100 border-t border-slate-200 mt-auto shrink-0">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+            <div className="grid md:grid-cols-2 gap-8 text-sm text-slate-500">
+              <div>
+                <h4 className="font-bold text-slate-700 mb-2 uppercase text-xs tracking-wider">Disclaimer</h4>
+                <p className="mb-2">
+                  Data provided for information purposes only. This tool is not affiliated with the Wiltshire Police or the Office for National Statistics.
+                  This report is generated automatically using open government data and should not be used for legal or emergency purposes.
+                </p>
+                <p><strong>Last Retrieved:</strong> {new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
+              </div>
+              <div>
+                <h4 className="font-bold text-slate-700 mb-2 uppercase text-xs tracking-wider">Data Sources</h4>
+                <ul className="space-y-2">
+                  <li className="flex gap-2">
+                    <span>•</span>
+                    <span>
+                      <strong>Crime Data:</strong> Provided by the <a href="https://data.police.uk/about/data/" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">Police.uk API</a>. 
+                      Contains public sector information licensed under the <a href="https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">Open Government Licence v3.0</a>.
+                    </span>
+                  </li>
+                  <li className="flex gap-2">
+                    <span>•</span>
+                    <span>
+                      <strong>Parish Boundary:</strong> <a href="https://geoportal.statistics.gov.uk/" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">ONS Open Geography Portal</a>. 
+                      Contains National Statistics data © Crown copyright and database right {new Date().getFullYear()}.
+                      Contains OS data © Crown copyright and database right {new Date().getFullYear()}.
+                    </span>
+                  </li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </footer>
+      )}
 
       <EmbedModal isOpen={showEmbedModal} onClose={() => setShowEmbedModal(false)} />
     </div>

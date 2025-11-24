@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { X, Copy, Check, Code } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { X, Copy, Check, Code, Link as LinkIcon } from 'lucide-react';
 
 interface EmbedModalProps {
   isOpen: boolean;
@@ -8,11 +8,19 @@ interface EmbedModalProps {
 
 const EmbedModal: React.FC<EmbedModalProps> = ({ isOpen, onClose }) => {
   const [copied, setCopied] = useState(false);
+  const [appUrl, setAppUrl] = useState('');
+
+  // Initialize URL when modal opens
+  useEffect(() => {
+    if (isOpen) {
+        let currentUrl = window.location.href;
+        // Strip specific file references if present (e.g., index.html) to keep it clean
+        currentUrl = currentUrl.replace(/\/index\.html$/, '/');
+        setAppUrl(currentUrl);
+    }
+  }, [isOpen]);
 
   if (!isOpen) return null;
-
-  // Generate the current URL (removes query params to keep it clean)
-  const appUrl = window.location.origin + window.location.pathname;
 
   const embedCode = `<iframe 
   src="${appUrl}" 
@@ -30,10 +38,10 @@ const EmbedModal: React.FC<EmbedModalProps> = ({ isOpen, onClose }) => {
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl overflow-hidden">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]">
         
         {/* Header */}
-        <div className="bg-slate-900 px-6 py-4 flex items-center justify-between">
+        <div className="bg-slate-900 px-6 py-4 flex items-center justify-between shrink-0">
           <div className="flex items-center space-x-2 text-white">
             <Code className="w-5 h-5" />
             <h3 className="font-semibold text-lg">Embed on Parish Website</h3>
@@ -47,40 +55,64 @@ const EmbedModal: React.FC<EmbedModalProps> = ({ isOpen, onClose }) => {
         </div>
 
         {/* Body */}
-        <div className="p-6 space-y-6">
-          <p className="text-slate-600 text-sm">
-            To display this dashboard on the parish website, copy the code below and paste it into an 
-            <strong> HTML Block</strong> or <strong>Code Widget</strong> on your CMS (WordPress, Wix, etc).
-          </p>
-
-          <div className="relative">
-            <pre className="bg-slate-100 border border-slate-200 rounded-lg p-4 text-xs font-mono text-slate-700 overflow-x-auto whitespace-pre-wrap break-all">
-              {embedCode}
-            </pre>
-            <button
-              onClick={handleCopy}
-              className="absolute top-2 right-2 p-2 bg-white border border-slate-200 rounded-md shadow-sm hover:bg-slate-50 transition-colors group"
-              title="Copy to clipboard"
-            >
-              {copied ? (
-                <Check className="w-4 h-4 text-emerald-500" />
-              ) : (
-                <Copy className="w-4 h-4 text-slate-500 group-hover:text-blue-600" />
-              )}
-            </button>
+        <div className="p-6 space-y-6 overflow-y-auto">
+          
+          <div className="space-y-3">
+             <label className="block text-sm font-medium text-slate-700">
+                1. Verify Application URL
+             </label>
+             <div className="relative">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                  <LinkIcon className="h-4 w-4 text-slate-400" />
+                </div>
+                <input
+                  type="text"
+                  value={appUrl}
+                  onChange={(e) => setAppUrl(e.target.value)}
+                  className="block w-full pl-10 pr-3 py-2 border border-slate-300 rounded-md leading-5 bg-white placeholder-slate-500 focus:outline-none focus:placeholder-slate-400 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 sm:text-sm transition duration-150 ease-in-out"
+                  placeholder="https://your-username.github.io/repo-name/"
+                />
+             </div>
+             <p className="text-xs text-slate-500">
+                If you are viewing this on <strong>localhost</strong> but deploying to <strong>GitHub Pages</strong>, paste your live GitHub URL above to generate the correct code.
+             </p>
           </div>
 
-          <div className="bg-blue-50 border border-blue-100 rounded-lg p-4">
-            <h4 className="text-sm font-semibold text-blue-800 mb-1">Important for Public Use</h4>
-            <p className="text-xs text-blue-700">
-              Ensure this application is deployed to a public URL (like Vercel or Netlify) before embedding. 
-              If you embed the "localhost" link, visitors will not see the report.
+          <div className="space-y-3">
+            <label className="block text-sm font-medium text-slate-700">
+               2. Copy Embed Code
+            </label>
+            <p className="text-slate-600 text-sm">
+              Copy the code below and paste it into an <strong>HTML Block</strong> or <strong>Code Widget</strong> on your CMS (WordPress, Wix, etc).
             </p>
+
+            <div className="relative">
+              <pre className="bg-slate-100 border border-slate-200 rounded-lg p-4 text-xs font-mono text-slate-700 overflow-x-auto whitespace-pre-wrap break-all shadow-inner">
+                {embedCode}
+              </pre>
+              <button
+                onClick={handleCopy}
+                className="absolute top-2 right-2 p-2 bg-white border border-slate-200 rounded-md shadow-sm hover:bg-slate-50 transition-colors group"
+                title="Copy to clipboard"
+              >
+                {copied ? (
+                  <Check className="w-4 h-4 text-emerald-500" />
+                ) : (
+                  <Copy className="w-4 h-4 text-slate-500 group-hover:text-blue-600" />
+                )}
+              </button>
+            </div>
+          </div>
+          
+          <div className="bg-blue-50 border border-blue-100 rounded-lg p-4">
+             <p className="text-xs text-blue-700">
+               <strong>Tip:</strong> The iframe height is set to 900px by default. You can adjust the <code>height="900"</code> value in the code above to better fit your website's layout.
+             </p>
           </div>
         </div>
 
         {/* Footer */}
-        <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 flex justify-end">
+        <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 flex justify-end shrink-0">
           <button
             onClick={onClose}
             className="px-4 py-2 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-800 transition-colors"
