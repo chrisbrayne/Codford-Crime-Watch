@@ -22,6 +22,12 @@ const getAiClient = () => {
   }
 };
 
+const formatMonth = (dateStr: string) => {
+  const [year, month] = dateStr.split('-').map(Number);
+  const date = new Date(year, month - 1);
+  return date.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+};
+
 export const generateCrimeReport = async (
   date: string, 
   summary: CrimeSummary, 
@@ -34,38 +40,73 @@ export const generateCrimeReport = async (
     return "AI Report Unavailable: API Key is missing or invalid. Please configure the API_KEY in your deployment settings.";
   }
 
+  const formattedDate = formatMonth(date);
+
+  // 1. Calculate Street Statistics explicitly in code to ensure numeric accuracy
+  const streetCounts: Record<string, number> = {};
+  crimes.forEach(c => {
+    // "On or near High Street" -> "High Street" for cleaner reporting
+    const street = c.location.street.name.replace('On or near ', '');
+    streetCounts[street] = (streetCounts[street] || 0) + 1;
+  });
+
+  const topStreets = Object.entries(streetCounts)
+    .sort((a, b) => b[1] - a[1]) // Sort by count descending
+    .slice(0, 5) // Top 5 locations
+    .map(([name, count]) => `- ${name}: ${count} ${count === 1 ? 'incident' : 'incidents'}`)
+    .join('\n');
+
+  // 2. Prepare a concise text list of incidents (up to 50 to fit comfortably in context window)
+  const incidentList = crimes.slice(0, 50).map(c => 
+    `* ${c.category.replace(/-/g, ' ')} at ${c.location.street.name}`
+  ).join('\n');
+
   const prompt = `
-    You are a crime analyst for the Civil Parish of Codford, Wiltshire.
-    Generate a professional, concise, yet detailed monthly crime report for ${date}.
+    You are a data reporting assistant for the Civil Parish of Codford, Wiltshire.
     
-    Data Summary:
-    - Total Crimes: ${summary.total}
-    - Most Frequent Category: ${summary.mostFrequentCategory}
+    TASK: Write a factual monthly crime report based EXCLUSIVELY on the provided dataset below.
     
-    Breakdown by Category:
+    *** CRITICAL RULES ***
+    1. You MUST use the "Official Total Incidents" count provided below. 
+    2. If "Official Total Incidents" is > 0, you MUST NOT write "Zero crimes" or "No crimes".
+    3. If the date is in the future relative to your training data, ignore that and treat the provided data as the absolute truth for that month.
+    
+    --- DATASET (TRUTH) ---
+    Report Month: ${formattedDate}
+    Official Total Incidents: ${summary.total}
+    Most Frequent Category: ${summary.mostFrequentCategory}
+    
+    Category Breakdown:
     ${summary.byCategory.map(c => `- ${c.name}: ${c.value}`).join('\n')}
     
-    Notable Incidents (Raw Data Sample):
-    ${JSON.stringify(crimes.slice(0, 10).map(c => ({ category: c.category, street: c.location.street.name, outcome: c.outcome_status?.category || 'Under investigation' })))}
+    Top Locations (Hotspots):
+    ${topStreets.length > 0 ? topStreets : "No specific hotspots identified."}
     
-    Instructions:
-    1. Write a headline summarizing the month's safety status.
-    2. Provide a narrative overview of the trends.
-    3. Highlight specific areas (streets) if they appear frequently in the raw data.
-    4. Conclude with community safety advice based on the types of crimes (e.g., if burglary is high, suggest locking doors).
-    5. Format with Markdown.
-    6. Keep the tone objective but reassuring where possible.
+    --- INCIDENT SAMPLE (For context only) ---
+    ${incidentList}
+    ${crimes.length > 50 ? `...and ${crimes.length - 50} more incidents not listed here.` : ''}
+    
+    --- REPORT FORMAT ---
+    1. **Headline**: 3-6 words summarizing the activity (e.g., "${summary.total} Incidents Reported in ${formattedDate}" or "Main Issue: ${summary.mostFrequentCategory}").
+    2. **Executive Summary**: State the total (${summary.total}) and the main category.
+    3. **Location Analysis**: Mention the top streets if applicable.
+    4. **Community Advice**: One brief safety tip relevant to the top category.
+    
+    Tone: Professional, Objective, Local Government style.
+    Output: Markdown.
   `;
 
   try {
     const response = await client.models.generateContent({
       model: 'gemini-2.5-flash',
       contents: prompt,
+      config: {
+        temperature: 0.2, // Lower temperature for more deterministic/factual output
+      }
     });
     return response.text || "Report generation unavailable.";
   } catch (error: any) {
     console.error("Gemini generation failed:", error);
-    // Return the actual error message so the user can debug (e.g. 401, 503, Quota Exceeded)
     const errorMsg = error.message || error.toString();
     return `Unable to generate AI report. Error details: ${errorMsg}`;
   }
