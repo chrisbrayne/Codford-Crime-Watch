@@ -7,7 +7,7 @@ let ai: GoogleGenAI | null = null;
 const getAiClient = () => {
   if (ai) return ai;
   
-  // Standard environment variable access
+  // Access the API key injected by Vite
   const apiKey = process.env.API_KEY;
   
   if (!apiKey) {
@@ -114,7 +114,7 @@ export const generateCrimeReport = async (
     // The error object might differ between environments, so we stringify it to search for the code.
     const errString = JSON.stringify(error, Object.getOwnPropertyNames(error));
 
-    // If the error mentions Referrer Blocking, the Key WAS decoded correctly, but the permissions are wrong.
+    // If the error mentions Referrer Blocking, permissions are wrong.
     if (errString.includes("API_KEY_HTTP_REFERRER_BLOCKED") || errString.includes("Requests from referer")) {
         const origin = typeof window !== 'undefined' ? window.location.origin : 'this website';
         const isLocalhost = origin.includes('localhost') || origin.includes('127.0.0.1');
