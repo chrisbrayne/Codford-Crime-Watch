@@ -14,7 +14,7 @@ const getAiClient = () => {
     console.warn("Gemini API Key is missing. Make sure API_KEY is set in your Netlify Environment Variables.");
     return null;
   }
-  
+
   try {
     ai = new GoogleGenAI({ apiKey });
     return ai;
