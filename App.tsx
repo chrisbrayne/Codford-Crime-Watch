@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { fetchCodfordBoundary } from './services/onsService';
-import { fetchLatestAvailableDate, fetchCrimesInBoundary } from './services/policeService';
+import { fetchAvailableDates, fetchCrimesInBoundary } from './services/policeService';
 import { generateCrimeReport } from './services/geminiService';
 import { Crime, GeoFeature, CrimeSummary } from './types';
 import CrimeMap from './components/CrimeMap';
@@ -18,11 +18,15 @@ const formatDate = (dateStr: string) => {
 };
 
 const App: React.FC = () => {
-  const [loading, setLoading] = useState<boolean>(true);
+  const [initialLoading, setInitialLoading] = useState<boolean>(true);
+  const [dataLoading, setDataLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  
   const [boundary, setBoundary] = useState<GeoFeature | null>(null);
-  const [crimes, setCrimes] = useState<Crime[]>([]);
+  const [availableDates, setAvailableDates] = useState<string[]>([]);
   const [reportDate, setReportDate] = useState<string>('');
+  
+  const [crimes, setCrimes] = useState<Crime[]>([]);
   const [aiReport, setAiReport] = useState<string | null>(null);
   const [generatingReport, setGeneratingReport] = useState<boolean>(false);
   const [showEmbedModal, setShowEmbedModal] = useState<boolean>(false);
@@ -32,36 +36,61 @@ const App: React.FC = () => {
   const [hoveredCrimeId, setHoveredCrimeId] = useState<number | null>(null);
   const [reportCopied, setReportCopied] = useState<boolean>(false);
 
+  // 1. Initial Setup: Get Boundary and Date List
   useEffect(() => {
-    const initData = async () => {
+    const initApp = async () => {
       try {
-        setLoading(true);
-        // 1. Get Boundary
+        setInitialLoading(true);
+        
+        // Fetch Boundary
         const boundaryData = await fetchCodfordBoundary();
         if (!boundaryData) {
           throw new Error("Could not find boundary data for Codford.");
         }
         setBoundary(boundaryData);
 
-        // 2. Get Date
-        const date = await fetchLatestAvailableDate();
-        setReportDate(date);
-
-        // 3. Get Crimes
-        const crimeData = await fetchCrimesInBoundary(boundaryData, date);
-        setCrimes(crimeData);
+        // Fetch Date List
+        const dates = await fetchAvailableDates();
+        setAvailableDates(dates);
+        
+        // Set Default Date (Latest)
+        if (dates.length > 0) {
+          setReportDate(dates[0]);
+        }
 
       } catch (err: any) {
-        setError(err.message || "An unexpected error occurred.");
+        setError(err.message || "An unexpected error occurred during initialization.");
       } finally {
-        setLoading(false);
+        setInitialLoading(false);
       }
     };
 
-    initData();
+    initApp();
   }, []);
 
-  // Calculate Summary (Always based on ALL crimes for context)
+  // 2. Fetch Crimes when Date or Boundary Changes
+  useEffect(() => {
+    const loadCrimes = async () => {
+      if (!boundary || !reportDate) return;
+
+      try {
+        setDataLoading(true);
+        setAiReport(null); // Reset report when data changes
+        const crimeData = await fetchCrimesInBoundary(boundary, reportDate);
+        setCrimes(crimeData);
+      } catch (err: any) {
+        console.error("Failed to load crimes for date", reportDate, err);
+        // Don't block the UI, just show empty crimes
+        setCrimes([]); 
+      } finally {
+        setDataLoading(false);
+      }
+    };
+
+    loadCrimes();
+  }, [boundary, reportDate]);
+
+  // Calculate Summary
   const summary: CrimeSummary = useMemo(() => {
     const counts: Record<string, number> = {};
     crimes.forEach(c => {
@@ -95,14 +124,14 @@ const App: React.FC = () => {
 
   // Trigger AI Report
   useEffect(() => {
-    if (!loading && crimes.length >= 0 && summary && reportDate && !aiReport && !generatingReport) {
+    if (!initialLoading && !dataLoading && crimes.length >= 0 && summary && reportDate && !aiReport && !generatingReport) {
        setGeneratingReport(true);
        generateCrimeReport(reportDate, summary, crimes)
         .then(text => setAiReport(text))
         .catch(err => console.error(err))
         .finally(() => setGeneratingReport(false));
     }
-  }, [loading, crimes, summary, reportDate, aiReport, generatingReport]);
+  }, [initialLoading, dataLoading, crimes, summary, reportDate, aiReport, generatingReport]);
 
   const handleCopyReport = () => {
     if (aiReport) {
@@ -110,6 +139,11 @@ const App: React.FC = () => {
       setReportCopied(true);
       setTimeout(() => setReportCopied(false), 2000);
     }
+  };
+
+  const handleDateChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    setReportDate(e.target.value);
+    setSelectedCategory('all'); // Reset filter on new date load
   };
 
   if (error) {
@@ -145,10 +179,12 @@ const App: React.FC = () => {
                 <MapPin className="w-4 h-4" />
                 <span>Codford, Wiltshire</span>
              </div>
-             <div className="hidden sm:flex items-center space-x-1">
-                <Calendar className="w-4 h-4" />
-                <span>{reportDate}</span>
-             </div>
+             {reportDate && (
+              <div className="hidden sm:flex items-center space-x-1">
+                  <Calendar className="w-4 h-4" />
+                  <span>{formatDate(reportDate)}</span>
+              </div>
+             )}
              <button 
                 onClick={() => setShowEmbedModal(true)}
                 className="flex items-center space-x-1 bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded-md transition-colors text-white border border-slate-700"
@@ -193,209 +229,251 @@ const App: React.FC = () => {
            </div>
         </div>
 
-        {loading ? (
+        {initialLoading ? (
            <div className="flex flex-col items-center justify-center h-[60vh] space-y-4">
               <Loader2 className="w-10 h-10 text-blue-600 animate-spin" />
-              <p className="text-slate-500 animate-pulse">Consulting police records and ONS geography...</p>
+              <p className="text-slate-500 animate-pulse">Initializing geography and connection...</p>
            </div>
         ) : (
           <div className="space-y-8">
             
-            {/* Top Stats Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 flex items-center space-x-4">
-                <div className="p-3 bg-blue-50 text-blue-600 rounded-full">
-                  <ShieldAlert className="w-6 h-6" />
-                </div>
-                <div>
-                  <p className="text-sm text-slate-500 font-medium">Total Crimes</p>
-                  <p className="text-3xl font-bold text-slate-900">{summary.total}</p>
-                </div>
-              </div>
-              
-              <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 flex items-center space-x-4">
-                 <div className="p-3 bg-purple-50 text-purple-600 rounded-full">
-                  <BarChart3 className="w-6 h-6" />
-                </div>
-                <div>
-                  <p className="text-sm text-slate-500 font-medium">Top Category</p>
-                  <p className="text-lg font-bold text-slate-900 truncate max-w-[150px]" title={summary.mostFrequentCategory}>
-                    {summary.mostFrequentCategory}
-                  </p>
-                </div>
-              </div>
-
-               <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 flex items-center space-x-4">
-                 <div className="p-3 bg-emerald-50 text-emerald-600 rounded-full">
-                  <Info className="w-6 h-6" />
-                </div>
-                <div>
-                  <p className="text-sm text-slate-500 font-medium">Reporting Period</p>
-                  <p className="text-xl font-bold text-slate-900">{reportDate}</p>
-                </div>
-              </div>
-            </div>
-
-            {/* AI Report Section */}
-            <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-               <div className="bg-gradient-to-r from-blue-600 to-indigo-700 px-6 py-4 flex items-center justify-between">
-                  <div className="flex items-center space-x-2 text-white">
-                    <FileText className="w-5 h-5" />
-                    <h2 className="font-semibold text-lg">Activity Summary</h2>
-                  </div>
-                  <div className="flex items-center space-x-3">
-                    {generatingReport && <Loader2 className="w-5 h-5 text-white/80 animate-spin" />}
-                    {!generatingReport && aiReport && (
-                      <button 
-                        onClick={handleCopyReport}
-                        className="flex items-center space-x-1 text-xs bg-white/10 hover:bg-white/20 text-white px-2 py-1 rounded transition-colors"
-                        title="Copy report markdown to clipboard"
-                      >
-                         {reportCopied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-                         <span>{reportCopied ? 'Copied' : 'Copy Text'}</span>
-                      </button>
-                    )}
-                  </div>
-               </div>
-               <div className="p-8 prose prose-slate max-w-none">
-                  {generatingReport ? (
-                    <div className="space-y-3 animate-pulse">
-                      <div className="h-4 bg-slate-100 rounded w-3/4"></div>
-                      <div className="h-4 bg-slate-100 rounded w-full"></div>
-                      <div className="h-4 bg-slate-100 rounded w-5/6"></div>
-                    </div>
-                  ) : (
-                    <ReactMarkdown>{aiReport || "No analysis available."}</ReactMarkdown>
-                  )}
-               </div>
-            </div>
-
-            {/* Filter Controls */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            {/* Filter & Date Controls */}
+            <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex flex-col sm:flex-row justify-between items-center gap-4">
                <h3 className="text-lg font-semibold text-slate-800 flex items-center space-x-2">
-                  <MapPin className="w-5 h-5 text-slate-500" />
-                  <span>Geographic Distribution</span>
+                  <BarChart3 className="w-5 h-5 text-slate-500" />
+                  <span>Report Controls</span>
                 </h3>
                 
-                <div className="flex items-center space-x-2">
-                   <Filter className="w-4 h-4 text-slate-500" />
-                   <select 
-                      value={selectedCategory}
-                      onChange={(e) => setSelectedCategory(e.target.value)}
-                      className="bg-white border border-slate-300 text-slate-700 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block p-2"
-                   >
-                      <option value="all">All Categories</option>
-                      {uniqueCategories.map(cat => (
-                         <option key={cat} value={cat}>
-                           {cat.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
-                         </option>
-                      ))}
-                   </select>
+                <div className="flex flex-col sm:flex-row gap-4 w-full sm:w-auto">
+                    {/* Date Picker */}
+                    <div className="flex items-center space-x-2">
+                      <label htmlFor="date-select" className="text-sm font-medium text-slate-600">Month:</label>
+                      <div className="relative">
+                         <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                         <select 
+                            id="date-select"
+                            value={reportDate}
+                            onChange={handleDateChange}
+                            disabled={dataLoading}
+                            className="pl-9 pr-8 py-2 bg-slate-50 border border-slate-300 text-slate-700 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full sm:w-48 disabled:opacity-50"
+                         >
+                            {availableDates.map(date => (
+                               <option key={date} value={date}>{formatDate(date)}</option>
+                            ))}
+                         </select>
+                      </div>
+                    </div>
+
+                    {/* Category Filter */}
+                    <div className="flex items-center space-x-2">
+                       <label htmlFor="category-select" className="text-sm font-medium text-slate-600">Type:</label>
+                       <div className="relative">
+                           <Filter className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                           <select 
+                              id="category-select"
+                              value={selectedCategory}
+                              onChange={(e) => setSelectedCategory(e.target.value)}
+                              disabled={dataLoading || crimes.length === 0}
+                              className="pl-9 pr-8 py-2 bg-slate-50 border border-slate-300 text-slate-700 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full sm:w-48 disabled:opacity-50"
+                           >
+                              <option value="all">All Categories</option>
+                              {uniqueCategories.map(cat => (
+                                 <option key={cat} value={cat}>
+                                   {cat.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                                 </option>
+                              ))}
+                           </select>
+                       </div>
+                    </div>
                 </div>
             </div>
 
-            {/* Visuals Grid */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-              <div className="space-y-4">
-                {boundary && (
-                  <CrimeMap 
-                    boundary={boundary} 
-                    crimes={filteredCrimes} 
-                    hoveredCrimeId={hoveredCrimeId}
-                  />
-                )}
-                <p className="text-xs text-slate-400">
-                  *Map visualizes crime locations relative to the Codford Civil Parish boundary. 
-                  Red dots represent approximate locations provided by police.uk.
-                  Hover over the Incident Log to highlight locations.
-                </p>
-              </div>
+            {dataLoading ? (
+               <div className="flex flex-col items-center justify-center py-20 space-y-4">
+                  <Loader2 className="w-8 h-8 text-blue-600 animate-spin" />
+                  <p className="text-slate-500">Retrieving crime data for {formatDate(reportDate)}...</p>
+               </div>
+            ) : (
+                <>
+                {/* Top Stats Cards */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 flex items-center space-x-4">
+                    <div className="p-3 bg-blue-50 text-blue-600 rounded-full">
+                      <ShieldAlert className="w-6 h-6" />
+                    </div>
+                    <div>
+                      <p className="text-sm text-slate-500 font-medium">Total Crimes</p>
+                      <p className="text-3xl font-bold text-slate-900">{summary.total}</p>
+                    </div>
+                  </div>
+                  
+                  <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 flex items-center space-x-4">
+                     <div className="p-3 bg-purple-50 text-purple-600 rounded-full">
+                      <BarChart3 className="w-6 h-6" />
+                    </div>
+                    <div>
+                      <p className="text-sm text-slate-500 font-medium">Top Category</p>
+                      <p className="text-lg font-bold text-slate-900 truncate max-w-[150px]" title={summary.mostFrequentCategory}>
+                        {summary.mostFrequentCategory}
+                      </p>
+                    </div>
+                  </div>
 
-              <div className="space-y-4">
-                 <div className="flex items-center justify-between">
-                    <h3 className="text-lg font-semibold text-slate-800 flex items-center space-x-2">
-                      <BarChart3 className="w-5 h-5 text-slate-500" />
-                      <span>Category Breakdown</span>
-                    </h3>
-                    <span className="text-xs text-slate-400 bg-slate-100 px-2 py-1 rounded">
-                      Total: {summary.total}
-                    </span>
-                 </div>
-                <CrimeChart summary={summary} />
-              </div>
-            </div>
+                   <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 flex items-center space-x-4">
+                     <div className="p-3 bg-emerald-50 text-emerald-600 rounded-full">
+                      <Info className="w-6 h-6" />
+                    </div>
+                    <div>
+                      <p className="text-sm text-slate-500 font-medium">Reporting Period</p>
+                      <p className="text-xl font-bold text-slate-900">{formatDate(reportDate)}</p>
+                    </div>
+                  </div>
+                </div>
 
-            {/* Raw Data Table */}
-            <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-              <div className="px-6 py-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
-                <h3 className="font-semibold text-slate-800">Incident Log</h3>
-                <span className="text-xs text-slate-500">
-                  {filteredCrimes.length} {filteredCrimes.length === 1 ? 'incident' : 'incidents'} shown
-                </span>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-sm text-slate-600">
-                  <thead className="bg-slate-50 text-slate-900 font-medium">
-                    <tr>
-                      <th className="px-6 py-3 whitespace-nowrap">Reported</th>
-                      <th className="px-6 py-3">Category</th>
-                      <th className="px-6 py-3">Location</th>
-                      <th className="px-6 py-3">Outcome</th>
-                      <th className="px-6 py-3 whitespace-nowrap">Last Update</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {filteredCrimes.map((crime) => (
-                      <tr 
-                        key={crime.id} 
-                        className={`transition-colors cursor-default ${
-                          hoveredCrimeId === crime.id ? 'bg-blue-50' : 'hover:bg-slate-50'
-                        }`}
-                        onMouseEnter={() => setHoveredCrimeId(crime.id)}
-                        onMouseLeave={() => setHoveredCrimeId(null)}
-                      >
-                        <td className="px-6 py-3 whitespace-nowrap">{formatDate(crime.month)}</td>
-                        <td className="px-6 py-3 capitalize">
-                           <span className={`inline-block px-2 py-0.5 rounded text-xs border ${
-                             crime.category === 'anti-social-behaviour' ? 'bg-amber-50 text-amber-700 border-amber-200' :
-                             crime.category.includes('violent') ? 'bg-red-50 text-red-700 border-red-200' :
-                             'bg-slate-100 text-slate-600 border-slate-200'
-                           }`}>
-                            {crime.category.replace(/-/g, ' ')}
-                           </span>
-                        </td>
-                        <td className="px-6 py-3 font-medium text-slate-700">{crime.location.street.name}</td>
-                        <td className="px-6 py-3">{crime.outcome_status?.category || 'Status unavailable'}</td>
-                        <td className="px-6 py-3 whitespace-nowrap">
-                          {crime.outcome_status?.date ? formatDate(crime.outcome_status.date) : '-'}
-                        </td>
-                      </tr>
-                    ))}
-                    {filteredCrimes.length === 0 && (
-                       <tr>
-                        <td colSpan={5} className="px-6 py-12 text-center text-slate-400">
-                          <p>No crimes recorded matching your selection.</p>
-                          {selectedCategory !== 'all' && (
-                            <button 
-                              onClick={() => setSelectedCategory('all')}
-                              className="mt-2 text-blue-600 hover:underline text-sm"
-                            >
-                              Clear filters
-                            </button>
-                          )}
-                        </td>
-                      </tr>
+                {/* AI Report Section */}
+                <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                   <div className="bg-gradient-to-r from-blue-600 to-indigo-700 px-6 py-4 flex items-center justify-between">
+                      <div className="flex items-center space-x-2 text-white">
+                        <FileText className="w-5 h-5" />
+                        <h2 className="font-semibold text-lg">Activity Summary</h2>
+                      </div>
+                      <div className="flex items-center space-x-3">
+                        {generatingReport && <Loader2 className="w-5 h-5 text-white/80 animate-spin" />}
+                        {!generatingReport && aiReport && (
+                          <button 
+                            onClick={handleCopyReport}
+                            className="flex items-center space-x-1 text-xs bg-white/10 hover:bg-white/20 text-white px-2 py-1 rounded transition-colors"
+                            title="Copy report markdown to clipboard"
+                          >
+                             {reportCopied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                             <span>{reportCopied ? 'Copied' : 'Copy Text'}</span>
+                          </button>
+                        )}
+                      </div>
+                   </div>
+                   <div className="p-8 prose prose-slate max-w-none">
+                      {generatingReport ? (
+                        <div className="space-y-3 animate-pulse">
+                          <div className="h-4 bg-slate-100 rounded w-3/4"></div>
+                          <div className="h-4 bg-slate-100 rounded w-full"></div>
+                          <div className="h-4 bg-slate-100 rounded w-5/6"></div>
+                        </div>
+                      ) : (
+                        <ReactMarkdown>{aiReport || "No analysis available."}</ReactMarkdown>
+                      )}
+                   </div>
+                </div>
+
+                {/* Visuals Grid */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                         <h3 className="text-lg font-semibold text-slate-800 flex items-center space-x-2">
+                          <MapPin className="w-5 h-5 text-slate-500" />
+                          <span>Incident Map</span>
+                        </h3>
+                    </div>
+                    {boundary && (
+                      <CrimeMap 
+                        boundary={boundary} 
+                        crimes={filteredCrimes} 
+                        hoveredCrimeId={hoveredCrimeId}
+                      />
                     )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
+                    <p className="text-xs text-slate-400">
+                      *Map visualizes crime locations relative to the Codford Civil Parish boundary. 
+                      Red dots represent approximate locations provided by police.uk.
+                      Hover over the Incident Log to highlight locations.
+                    </p>
+                  </div>
+
+                  <div className="space-y-4">
+                     <div className="flex items-center justify-between">
+                        <h3 className="text-lg font-semibold text-slate-800 flex items-center space-x-2">
+                          <BarChart3 className="w-5 h-5 text-slate-500" />
+                          <span>Category Breakdown</span>
+                        </h3>
+                        <span className="text-xs text-slate-400 bg-slate-100 px-2 py-1 rounded">
+                          Total: {summary.total}
+                        </span>
+                     </div>
+                    <CrimeChart summary={summary} />
+                  </div>
+                </div>
+
+                {/* Raw Data Table */}
+                <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                  <div className="px-6 py-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
+                    <h3 className="font-semibold text-slate-800">Incident Log</h3>
+                    <span className="text-xs text-slate-500">
+                      {filteredCrimes.length} {filteredCrimes.length === 1 ? 'incident' : 'incidents'} shown
+                    </span>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-sm text-slate-600">
+                      <thead className="bg-slate-50 text-slate-900 font-medium">
+                        <tr>
+                          <th className="px-6 py-3 whitespace-nowrap">Reported</th>
+                          <th className="px-6 py-3">Category</th>
+                          <th className="px-6 py-3">Location</th>
+                          <th className="px-6 py-3">Outcome</th>
+                          <th className="px-6 py-3 whitespace-nowrap">Last Update</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {filteredCrimes.map((crime) => (
+                          <tr 
+                            key={crime.id} 
+                            className={`transition-colors cursor-default ${
+                              hoveredCrimeId === crime.id ? 'bg-blue-50' : 'hover:bg-slate-50'
+                            }`}
+                            onMouseEnter={() => setHoveredCrimeId(crime.id)}
+                            onMouseLeave={() => setHoveredCrimeId(null)}
+                          >
+                            <td className="px-6 py-3 whitespace-nowrap">{formatDate(crime.month)}</td>
+                            <td className="px-6 py-3 capitalize">
+                               <span className={`inline-block px-2 py-0.5 rounded text-xs border ${
+                                 crime.category === 'anti-social-behaviour' ? 'bg-amber-50 text-amber-700 border-amber-200' :
+                                 crime.category.includes('violent') ? 'bg-red-50 text-red-700 border-red-200' :
+                                 'bg-slate-100 text-slate-600 border-slate-200'
+                               }`}>
+                                {crime.category.replace(/-/g, ' ')}
+                               </span>
+                            </td>
+                            <td className="px-6 py-3 font-medium text-slate-700">{crime.location.street.name}</td>
+                            <td className="px-6 py-3">{crime.outcome_status?.category || 'Status unavailable'}</td>
+                            <td className="px-6 py-3 whitespace-nowrap">
+                              {crime.outcome_status?.date ? formatDate(crime.outcome_status.date) : '-'}
+                            </td>
+                          </tr>
+                        ))}
+                        {filteredCrimes.length === 0 && (
+                           <tr>
+                            <td colSpan={5} className="px-6 py-12 text-center text-slate-400">
+                              <p>No crimes recorded matching your selection.</p>
+                              {selectedCategory !== 'all' && (
+                                <button 
+                                  onClick={() => setSelectedCategory('all')}
+                                  className="mt-2 text-blue-600 hover:underline text-sm"
+                                >
+                                  Clear filters
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+                </>
+            )}
 
           </div>
         )}
       </main>
 
-      {!loading && (
+      {!initialLoading && (
         <footer className="bg-slate-100 border-t border-slate-200 mt-auto shrink-0">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
             <div className="grid md:grid-cols-2 gap-8 text-sm text-slate-500">

@@ -38,28 +38,38 @@ const convertGeoJSONToPolyString = (feature: GeoFeature): string => {
     .join(':');
 };
 
-export const fetchLatestAvailableDate = async (): Promise<string> => {
+export const fetchAvailableDates = async (): Promise<string[]> => {
     try {
         const response = await fetch(`${POLICE_API_BASE}/crimes-street-dates`);
         if (!response.ok) throw new Error("Failed to fetch dates");
-        const dates = await response.json();
-        if (dates && dates.length > 0) {
-            return dates[0].date; // Returns YYYY-MM
+        const data = await response.json();
+        
+        // API returns [{ date: '2024-05' }, { date: '2024-04' } ...]
+        if (Array.isArray(data) && data.length > 0) {
+            return data.map((d: any) => d.date); 
         }
         
         // Fallback if array is empty
-        const d = new Date();
-        d.setMonth(d.getMonth() - 2);
-        return d.toISOString().slice(0, 7); 
+        return generateFallbackDates();
     } catch (e) {
-        console.warn("Error fetching available dates, defaulting to 2 months ago", e);
-        // Fallback to 2 months ago (Police data is typically 2 months behind)
-        // e.g., if it is May, latest data is usually March.
-        const d = new Date();
-        d.setMonth(d.getMonth() - 2);
-        return d.toISOString().slice(0, 7);
+        console.warn("Error fetching available dates, defaulting to fallback list", e);
+        return generateFallbackDates();
     }
 }
+
+// Helper to generate last 12 months as fallback
+const generateFallbackDates = (): string[] => {
+    const dates: string[] = [];
+    const d = new Date();
+    // Start 2 months ago
+    d.setMonth(d.getMonth() - 2);
+    
+    for (let i = 0; i < 12; i++) {
+        dates.push(d.toISOString().slice(0, 7));
+        d.setMonth(d.getMonth() - 1);
+    }
+    return dates;
+};
 
 export const fetchCrimesInBoundary = async (boundary: GeoFeature, date: string): Promise<Crime[]> => {
   const polyString = convertGeoJSONToPolyString(boundary);
