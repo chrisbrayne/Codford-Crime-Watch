@@ -100,13 +100,12 @@ const executeQuery = async (url: string, whereClause: string): Promise<GeoFeatur
         try {
           data = await response.json();
         } catch (jsonError) {
-          console.warn(`ONS API at ${url} returned invalid JSON.`);
+          // Silent fail for invalid JSON
           return null;
         }
 
         // Check for ArcGIS error response even with 200 OK
         if (data.error) {
-            console.warn(`ONS API returned application error: ${data.error.message || data.error.code}`);
             return null;
         }
 
@@ -114,20 +113,17 @@ const executeQuery = async (url: string, whereClause: string): Promise<GeoFeatur
             return data.features[0] as GeoFeature;
         }
     } catch (error) {
-        // Silent catch for individual endpoint failures to avoid console spam
+        // Silent catch for individual endpoint failures
     }
     return null;
 };
 
 export const fetchCodfordBoundary = async (): Promise<GeoFeature> => {
-  console.log("Starting ONS Boundary Search...");
-
   for (const endpoint of ENDPOINTS) {
     // Strategy 1: Search by ONS Code (Most Precise)
     let feature = await executeQuery(endpoint.url, `${endpoint.fields.code} = '${CODFORD_ONS_CODE}'`);
     
     if (feature) {
-      console.log(`Found boundary in ${endpoint.year} using Code.`);
       return feature;
     }
 
@@ -136,11 +132,10 @@ export const fetchCodfordBoundary = async (): Promise<GeoFeature> => {
     feature = await executeQuery(endpoint.url, `${endpoint.fields.name} = 'Codford'`);
     
     if (feature) {
-      console.log(`Found boundary in ${endpoint.year} using Name.`);
       return feature;
     }
   }
 
-  console.error("All ONS API endpoints failed. Using fallback boundary.");
+  console.warn("All ONS API endpoints failed. Using fallback boundary.");
   return FALLBACK_BOUNDARY;
 };

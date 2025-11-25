@@ -6,12 +6,20 @@ const POLICE_API_BASE = "https://data.police.uk/api";
 const convertGeoJSONToPolyString = (feature: GeoFeature): string => {
   let coords: number[][] = [];
 
+  // Safety check: Ensure geometry and coordinates exist
+  if (!feature.geometry || !feature.geometry.coordinates) {
+    console.warn("Invalid geometry object provided to converter");
+    return "";
+  }
+
   if (feature.geometry.type === 'Polygon') {
     coords = (feature.geometry.coordinates as number[][][])[0];
   } else if (feature.geometry.type === 'MultiPolygon') {
      // Take the largest polygon (usually the first in simple GeoJSON, but we assume [0][0])
     coords = (feature.geometry.coordinates as number[][][][])[0][0];
   }
+
+  if (!coords || coords.length === 0) return "";
 
   // Algorithm: Simple stride reduction to keep point count manageable
   // Police API allows POST but frequently errors (500) if > 100 points.
@@ -46,7 +54,10 @@ export const fetchAvailableDates = async (): Promise<string[]> => {
         
         // API returns [{ date: '2024-05' }, { date: '2024-04' } ...]
         if (Array.isArray(data) && data.length > 0) {
-            return data.map((d: any) => d.date); 
+            // Sort Descending just in case API order changes
+            return data
+                .map((d: any) => d.date)
+                .sort((a: string, b: string) => b.localeCompare(a));
         }
         
         // Fallback if array is empty

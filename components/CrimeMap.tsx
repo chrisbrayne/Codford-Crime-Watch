@@ -11,6 +11,9 @@ interface CrimeMapProps {
 const CrimeMap: React.FC<CrimeMapProps> = ({ boundary, crimes, hoveredCrimeId }) => {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
+  // Use a FeatureGroup to hold all data layers. This allows us to clear specific content
+  // without risking the removal of the base tile layer.
+  const dataLayerRef = useRef<L.FeatureGroup | null>(null);
   const markersRef = useRef<{ [id: number]: L.CircleMarker }>({});
 
   // Initialize Map (Run Once)
@@ -28,12 +31,18 @@ const CrimeMap: React.FC<CrimeMapProps> = ({ boundary, crimes, hoveredCrimeId })
       maxZoom: 19
     }).addTo(map);
 
+    // Create a feature group for our data and add it to the map
+    const dataLayer = new L.FeatureGroup();
+    dataLayer.addTo(map);
+    
     mapInstanceRef.current = map;
+    dataLayerRef.current = dataLayer;
 
     return () => {
         if (mapInstanceRef.current) {
             mapInstanceRef.current.remove();
             mapInstanceRef.current = null;
+            dataLayerRef.current = null;
         }
     };
   }, []);
@@ -41,17 +50,12 @@ const CrimeMap: React.FC<CrimeMapProps> = ({ boundary, crimes, hoveredCrimeId })
   // Update Data Layers
   useEffect(() => {
     const map = mapInstanceRef.current;
-    if (!map || !boundary) return;
+    const dataLayer = dataLayerRef.current;
+    if (!map || !dataLayer || !boundary) return;
 
-    // Reset markers ref
+    // Clear only our specific data layers, leaving the tile map intact
+    dataLayer.clearLayers();
     markersRef.current = {};
-
-    // Clear existing layers
-    map.eachLayer((layer) => {
-        if (layer instanceof L.GeoJSON || layer instanceof L.CircleMarker) {
-            map.removeLayer(layer);
-        }
-    });
 
     // 1. Render Boundary
     const boundaryLayer = L.geoJSON(boundary as any, {
@@ -64,7 +68,7 @@ const CrimeMap: React.FC<CrimeMapProps> = ({ boundary, crimes, hoveredCrimeId })
       }
     });
     
-    boundaryLayer.addTo(map);
+    boundaryLayer.addTo(dataLayer);
 
     if (boundaryLayer.getBounds().isValid()) {
         map.fitBounds(boundaryLayer.getBounds(), { padding: [20, 20] });
@@ -93,12 +97,12 @@ const CrimeMap: React.FC<CrimeMapProps> = ({ boundary, crimes, hoveredCrimeId })
           </div>
         `, { direction: 'top', offset: [0, -5] });
         
-        marker.addTo(map);
+        marker.addTo(dataLayer);
         markersRef.current[crime.id] = marker;
       }
     });
 
-  }, [boundary, crimes]); // Re-run if data changes (e.g. filter applied)
+  }, [boundary, crimes]);
 
   // Handle Highlighting efficiently without rebuilding map
   useEffect(() => {
