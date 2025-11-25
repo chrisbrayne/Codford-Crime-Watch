@@ -27,6 +27,7 @@ const App: React.FC = () => {
   const [reportDate, setReportDate] = useState<string>('');
   
   const [crimes, setCrimes] = useState<Crime[]>([]);
+  const [lastFetchedDate, setLastFetchedDate] = useState<string | null>(null);
   const [aiReport, setAiReport] = useState<string | null>(null);
   const [generatingReport, setGeneratingReport] = useState<boolean>(false);
   const [showEmbedModal, setShowEmbedModal] = useState<boolean>(false);
@@ -78,10 +79,12 @@ const App: React.FC = () => {
         setAiReport(null); // Reset report when data changes
         const crimeData = await fetchCrimesInBoundary(boundary, reportDate);
         setCrimes(crimeData);
+        setLastFetchedDate(reportDate); // Mark this date as successfully loaded
       } catch (err: any) {
         console.error("Failed to load crimes for date", reportDate, err);
         // Don't block the UI, just show empty crimes
         setCrimes([]); 
+        setLastFetchedDate(reportDate); // Mark loaded (as empty) to allow report generation
       } finally {
         setDataLoading(false);
       }
@@ -124,14 +127,25 @@ const App: React.FC = () => {
 
   // Trigger AI Report
   useEffect(() => {
-    if (!initialLoading && !dataLoading && crimes.length >= 0 && summary && reportDate && !aiReport && !generatingReport) {
+    // Only generate if we are not loading, have data structures, report doesn't exist yet,
+    // AND crucially, the data currently in memory matches the requested report date.
+    if (
+      !initialLoading && 
+      !dataLoading && 
+      crimes.length >= 0 && 
+      summary && 
+      reportDate && 
+      !aiReport && 
+      !generatingReport && 
+      lastFetchedDate === reportDate
+    ) {
        setGeneratingReport(true);
        generateCrimeReport(reportDate, summary, crimes)
         .then(text => setAiReport(text))
         .catch(err => console.error(err))
         .finally(() => setGeneratingReport(false));
     }
-  }, [initialLoading, dataLoading, crimes, summary, reportDate, aiReport, generatingReport]);
+  }, [initialLoading, dataLoading, crimes, summary, reportDate, aiReport, generatingReport, lastFetchedDate]);
 
   const handleCopyReport = () => {
     if (aiReport) {
