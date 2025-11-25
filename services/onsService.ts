@@ -95,7 +95,14 @@ const executeQuery = async (url: string, whereClause: string): Promise<GeoFeatur
             return null;
         }
 
-        const data: any = await response.json();
+        // Safe JSON parsing: ArcGIS sometimes returns HTML error pages on 200 OK
+        let data: any;
+        try {
+          data = await response.json();
+        } catch (jsonError) {
+          console.warn(`ONS API at ${url} returned invalid JSON.`);
+          return null;
+        }
 
         // Check for ArcGIS error response even with 200 OK
         if (data.error) {

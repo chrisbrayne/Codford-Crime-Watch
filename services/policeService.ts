@@ -14,8 +14,9 @@ const convertGeoJSONToPolyString = (feature: GeoFeature): string => {
   }
 
   // Algorithm: Simple stride reduction to keep point count manageable
-  // Police API can handle ~150-200 points reliably via POST.
-  const MAX_POINTS = 150; 
+  // Police API allows POST but frequently errors (500) if > 100-120 points.
+  // We reduce strictly to ~75 points to ensure high reliability.
+  const MAX_POINTS = 75; 
   if (coords.length > MAX_POINTS) {
       const step = Math.ceil(coords.length / MAX_POINTS);
       coords = coords.filter((_, i) => i % step === 0);
@@ -78,13 +79,15 @@ export const fetchCrimesInBoundary = async (boundary: GeoFeature, date: string):
     });
 
     if (!response.ok) {
-      let errorDetails = response.statusText;
+      // Try to get error text, but don't fail if we can't
+      let errorDetails = `Status ${response.status}`;
       try {
           const text = await response.text();
-          if (text) errorDetails = text;
+          // API sometimes returns HTML for 500s, clip it
+          if (text) errorDetails = text.slice(0, 200); 
       } catch (e) { /* ignore text parse error */ }
       
-      throw new Error(`Police API Error ${response.status}: ${errorDetails}`);
+      throw new Error(`Police API Error: ${errorDetails}`);
     }
 
     const crimes: Crime[] = await response.json();
