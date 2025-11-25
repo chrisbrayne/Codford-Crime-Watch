@@ -70,11 +70,11 @@ const EmbedModal: React.FC<EmbedModalProps> = ({ isOpen, onClose }) => {
                   value={appUrl}
                   onChange={(e) => setAppUrl(e.target.value)}
                   className="block w-full pl-10 pr-3 py-2 border border-slate-300 rounded-md leading-5 bg-white placeholder-slate-500 focus:outline-none focus:placeholder-slate-400 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 sm:text-sm transition duration-150 ease-in-out"
-                  placeholder="https://your-username.github.io/repo-name/"
+                  placeholder="https://your-site.netlify.app/"
                 />
              </div>
              <p className="text-xs text-slate-500">
-                If you are viewing this on <strong>localhost</strong> but deploying to <strong>GitHub Pages</strong>, paste your live GitHub URL above to generate the correct code.
+                Ensure this matches your live website URL (e.g. from Netlify or Vercel).
              </p>
           </div>
 

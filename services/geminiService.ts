@@ -1,8 +1,26 @@
 import { GoogleGenAI } from "@google/genai";
 import { Crime, CrimeSummary } from '../types';
 
-// Initialize Gemini
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+// Lazy initialization to prevent crash if API key is missing on load
+let ai: GoogleGenAI | null = null;
+
+const getAiClient = () => {
+  if (ai) return ai;
+  
+  const apiKey = process.env.API_KEY;
+  if (!apiKey) {
+    console.warn("Gemini API Key is missing.");
+    return null;
+  }
+  
+  try {
+    ai = new GoogleGenAI({ apiKey });
+    return ai;
+  } catch (e) {
+    console.error("Failed to initialize Gemini client:", e);
+    return null;
+  }
+};
 
 export const generateCrimeReport = async (
   date: string, 
@@ -10,6 +28,12 @@ export const generateCrimeReport = async (
   crimes: Crime[]
 ): Promise<string> => {
   
+  const client = getAiClient();
+  
+  if (!client) {
+    return "AI Report Unavailable: API Key is missing or invalid. Please configure the API_KEY in your deployment settings.";
+  }
+
   const prompt = `
     You are a crime analyst for the Civil Parish of Codford, Wiltshire.
     Generate a professional, concise, yet detailed monthly crime report for ${date}.
@@ -34,7 +58,7 @@ export const generateCrimeReport = async (
   `;
 
   try {
-    const response = await ai.models.generateContent({
+    const response = await client.models.generateContent({
       model: 'gemini-2.5-flash',
       contents: prompt,
     });
