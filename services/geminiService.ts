@@ -7,21 +7,12 @@ let ai: GoogleGenAI | null = null;
 const getAiClient = () => {
   if (ai) return ai;
   
-  let apiKey = process.env.API_KEY;
-  if (!apiKey) {
-    console.warn("Gemini API Key is missing.");
-    return null;
-  }
+  // Standard environment variable access
+  const apiKey = process.env.API_KEY;
   
-  // Workaround for Netlify Secret Scanner:
-  // The build process reverses the key to hide the "AIza" prefix.
-  // We must reverse it back here if it doesn't look like a raw key.
-  if (!apiKey.startsWith('AIza')) {
-      const reversed = apiKey.split('').reverse().join('');
-      // Only apply if the reversal looks like a valid key
-      if (reversed.startsWith('AIza')) {
-          apiKey = reversed;
-      }
+  if (!apiKey) {
+    console.warn("Gemini API Key is missing. Make sure API_KEY is set in your Netlify Environment Variables.");
+    return null;
   }
   
   try {
@@ -48,7 +39,7 @@ export const generateCrimeReport = async (
   const client = getAiClient();
   
   if (!client) {
-    return "AI Report Unavailable: API Key is missing or invalid. Please configure the API_KEY in your deployment settings.";
+    return "AI Report Unavailable: API Key is missing. Please check your Netlify Site Settings > Environment Variables.";
   }
 
   const formattedDate = formatMonth(date);
@@ -118,6 +109,35 @@ export const generateCrimeReport = async (
     return response.text || "Report generation unavailable.";
   } catch (error: any) {
     console.error("Gemini generation failed:", error);
+    
+    // Check for specific API Key restriction errors
+    // The error object might differ between environments, so we stringify it to search for the code.
+    const errString = JSON.stringify(error, Object.getOwnPropertyNames(error));
+
+    // If the error mentions Referrer Blocking, the Key WAS decoded correctly, but the permissions are wrong.
+    if (errString.includes("API_KEY_HTTP_REFERRER_BLOCKED") || errString.includes("Requests from referer")) {
+        const origin = typeof window !== 'undefined' ? window.location.origin : 'this website';
+        const isLocalhost = origin.includes('localhost') || origin.includes('127.0.0.1');
+        
+        return `### ⚠️ API Key Permissions Error
+      
+The AI system could not generate a report because the **Google Cloud settings** for your API Key are blocking this website.
+
+**Current Origin:** \`${origin}\`
+
+**Why is this happening?**
+You have "Website Restrictions" enabled on your API Key, but this specific URL is not in the allowed list.
+
+**How to Fix:**
+1. Go to [Google Cloud Console > APIs & Services > Credentials](https://console.cloud.google.com/apis/credentials).
+2. Click on the API Key you are using.
+3. Under "Application restrictions":
+   - Ensure \`${origin}/*\` is added to the list.
+   ${isLocalhost ? '- **Note for Testing:** Since you are running on Localhost, you must specifically add `http://localhost:5173/*` (or your specific port) to the list.' : ''}
+   - Or, temporarily set it to "None" to verify it works.
+4. **Wait 5 Minutes:** Google Cloud changes can take a few minutes to propagate.`;
+    }
+
     const errorMsg = error.message || error.toString();
     return `Unable to generate AI report. Error details: ${errorMsg}`;
   }

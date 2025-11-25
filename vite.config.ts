@@ -6,18 +6,16 @@ export default defineConfig(({ mode }) => {
   // Fix: Cast process to any to resolve TS error about missing cwd() property
   const env = loadEnv(mode, (process as any).cwd(), '');
   
-  const rawKey = env.API_KEY || '';
-  
-  // Obfuscate by reversing the string.
-  // This bypasses the "AIza" regex scan without the complexity/fragility of Base64 padding.
-  const obfuscatedKey = rawKey.split('').reverse().join('');
+  // Sanitize API Key to remove potential whitespace from copy-paste
+  const apiKey = env.API_KEY ? env.API_KEY.trim() : undefined;
   
   return {
     plugins: [react()],
     // Base URL is root for Netlify
     base: '/', 
     define: {
-      'process.env.API_KEY': JSON.stringify(obfuscatedKey)
+      // In client-side apps, we must replace process.env.API_KEY with the actual value at build time
+      'process.env.API_KEY': JSON.stringify(apiKey)
     }
   };
 });
