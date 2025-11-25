@@ -14,9 +14,9 @@ const convertGeoJSONToPolyString = (feature: GeoFeature): string => {
   }
 
   // Algorithm: Simple stride reduction to keep point count manageable
-  // Police API allows POST but frequently errors (500) if > 100-120 points.
-  // We reduce strictly to ~75 points to ensure high reliability.
-  const MAX_POINTS = 75; 
+  // Police API allows POST but frequently errors (500) if > 100 points.
+  // We reduce strictly to ~45 points to ensure high reliability.
+  const MAX_POINTS = 45; 
   if (coords.length > MAX_POINTS) {
       const step = Math.ceil(coords.length / MAX_POINTS);
       coords = coords.filter((_, i) => i % step === 0);

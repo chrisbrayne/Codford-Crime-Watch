@@ -63,8 +63,10 @@ export const generateCrimeReport = async (
       contents: prompt,
     });
     return response.text || "Report generation unavailable.";
-  } catch (error) {
+  } catch (error: any) {
     console.error("Gemini generation failed:", error);
-    return "Unable to generate AI report at this time due to a connection error.";
+    // Return the actual error message so the user can debug (e.g. 401, 503, Quota Exceeded)
+    const errorMsg = error.message || error.toString();
+    return `Unable to generate AI report. Error details: ${errorMsg}`;
   }
 };
