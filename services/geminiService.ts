@@ -47,6 +47,88 @@ export const clearReportCache = async (date?: string): Promise<boolean> => {
   }
 };
 
+const formatMonth = (dateStr: string): string => {
+  if (!dateStr) return '-';
+  const [year, month] = dateStr.split('-').map(Number);
+  const date = new Date(year, month - 1);
+  return date.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+};
+
+const buildClientFallbackReport = (
+  date: string,
+  summary: CrimeSummary,
+  crimes: Crime[]
+): string => {
+  const formattedDate = formatMonth(date);
+  const total = summary.total;
+  const topCategory = summary.mostFrequentCategory || 'None';
+
+  const streetCounts: Record<string, number> = {};
+  (crimes || []).forEach((c) => {
+    const street = (c.location?.street?.name || 'Unknown Location').replace('On or near ', '');
+    streetCounts[street] = (streetCounts[street] || 0) + 1;
+  });
+
+  const topStreets = Object.entries(streetCounts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 4)
+    .map(([name, count]) => `- **${name}**: ${count} ${count === 1 ? 'incident' : 'incidents'}`);
+
+  let advice = 'Remain vigilant and report any suspicious activity immediately to Wiltshire Police via 101 (or 999 in emergencies).';
+  const lowerCat = topCategory.toLowerCase();
+  if (lowerCat.includes('anti-social') || lowerCat.includes('public order')) {
+    advice = 'Report persistent disturbances or antisocial behaviour to Wiltshire Police via 101 or the local community policing team to help target evening patrols.';
+  } else if (lowerCat.includes('burglary') || lowerCat.includes('theft') || lowerCat.includes('vehicle')) {
+    advice = 'Ensure all outbuildings, sheds, and vehicles remain securely locked, and consider motion sensor lighting or CCTV coverage on driveways.';
+  } else if (lowerCat.includes('violence') || lowerCat.includes('sexual')) {
+    advice = 'If you witness or experience threats or assault, seek safety immediately and call 999. Support is also available through local Wiltshire victim support services.';
+  } else if (total === 0) {
+    advice = 'No crimes were officially logged by Wiltshire Police in Codford Parish for this reporting period. Continue good community vigilance.';
+  }
+
+  const categoryLines = summary.byCategory.length > 0
+    ? summary.byCategory.map(c => `- **${c.name}**: ${c.value} incident${c.value === 1 ? '' : 's'}`).join('\n')
+    : '- No incidents recorded.';
+
+  const streetLines = topStreets.length > 0
+    ? topStreets.join('\n')
+    : '- No specific street cluster identified.';
+
+  return `### ${total} Incident${total === 1 ? '' : 's'} Reported in ${formattedDate}
+
+**Executive Summary:** Official Wiltshire Police records log **${total}** total incident${total === 1 ? '' : 's'} in Codford Parish for ${formattedDate}. The primary incident type was **${topCategory}**.
+
+#### Recorded Incident Categories:
+${categoryLines}
+
+#### Notable Locations / Hotspots:
+${streetLines}
+
+#### Community Safety Advice:
+${advice}
+
+*(Note: Parish Statistical Analysis fallback mode active.)*`;
+};
+
+const buildClientFallbackAssessment = (
+  date: string,
+  summary: CrimeSummary
+): string => {
+  const formattedDate = formatMonth(date);
+  const total = summary.total;
+  const topCat = summary.mostFrequentCategory || 'minor incident';
+
+  return `Evening All,
+
+Taking a steady look at the numbers for ${formattedDate}, Codford recorded ${total} incident${total === 1 ? '' : 's'} (${topCat.toLowerCase()}). While any incident in our village is naturally noticeable, putting these numbers into true perspective gives a reassuring picture.
+
+Wiltshire consistently remains one of the safest police force areas anywhere in England and Wales, with an annual rate of around 56 incidents per 1,000 residents compared to the national average of approximately 89 per 1,000. In a small rural parish of about 700 people like Codford, one or two incidents can create statistical blips on paper, but they do not signify an escalation in everyday community risk. 
+
+Our actual day-to-day risk level remains very low. Staying neighbourly, keeping outbuildings and vehicles secured, and reporting any suspicious activity ensures Codford continues to be the peaceful Wylye Valley haven we all appreciate.
+
+Don't have nightmares!`;
+};
+
 export const generateCrimeReport = async (
   date: string,
   summary: CrimeSummary,
@@ -71,7 +153,7 @@ export const generateCrimeReport = async (
 
     if (response.status === 429) {
       return {
-        report: data.report || 'Token limit reached. Please view the statistical breakdown above.',
+        report: data.report || buildClientFallbackReport(date, summary, crimes),
         source: 'statistical_fallback_quota',
         isQuotaExhausted: true,
         message: data.message || 'Gemini API tokens or rate limit per minute reached.',
@@ -80,24 +162,21 @@ export const generateCrimeReport = async (
 
     if (!response.ok) {
       return {
-        report: data.report || 'Unable to generate analysis. Review the statistics and crime log below.',
+        report: data.report || buildClientFallbackReport(date, summary, crimes),
         source: 'statistical_fallback_error',
         message: data.message || `Server returned status ${response.status}`,
       };
     }
 
     return {
-      report: data.report || 'No analysis available.',
+      report: data.report || buildClientFallbackReport(date, summary, crimes),
       source: data.source || 'gemini-3.8-flash',
       warning: data.warning,
     };
   } catch (error: any) {
     console.error('Failed to communicate with report API:', error);
-    
-    // Client-side emergency fallback if server call is unreachable
-    const topCategory = summary.mostFrequentCategory || 'None';
     return {
-      report: `### ${summary.total} Incidents Recorded in ${date}\n\n**Executive Summary:** Official Wiltshire Police records log **${summary.total}** incidents for Codford Parish. Primary category: **${topCategory}**.\n\n*(Note: Generated via Local Offline Statistical Summary)*`,
+      report: buildClientFallbackReport(date, summary, crimes),
       source: 'statistical_fallback_error',
       message: error.message || 'Network error while contacting report server',
     };
@@ -126,31 +205,31 @@ export const generateRiskAssessment = async (
 
     if (response.status === 429) {
       return {
-        assessment: data.assessment || "Evening All,\n\nCodford continues to maintain a very low crime profile compared to county and national benchmarks.\n\nDon't have nightmares!",
+        assessment: data.assessment || buildClientFallbackAssessment(date, summary),
         source: 'statistical_fallback_quota',
         isQuotaExhausted: true,
-        message: data.message,
+        message: data.message || 'Rate limit reached. Displaying baseline risk benchmark.',
       };
     }
 
     if (!response.ok) {
       return {
-        assessment: data.assessment || "Evening All,\n\nCodford remains an exceptionally low-risk rural parish compared to county and national averages.\n\nDon't have nightmares!",
+        assessment: data.assessment || buildClientFallbackAssessment(date, summary),
         source: 'statistical_fallback_error',
-        message: data.message,
+        message: data.message || `Server returned status ${response.status}`,
       };
     }
 
     return {
-      assessment: data.assessment,
+      assessment: data.assessment || buildClientFallbackAssessment(date, summary),
       source: data.source || 'gemini-3.8-flash',
     };
   } catch (error: any) {
     console.error('Failed to communicate with risk assessment API:', error);
     return {
-      assessment: `Evening All,\n\nOfficial records log ${summary.total} incident(s) for Codford in this reporting month. Wiltshire remains one of England's safest counties (~56/1,000 per year) and sits far below the national average (~89/1,000). Everyday crime risk in our parish is very low.\n\nDon't have nightmares!`,
+      assessment: buildClientFallbackAssessment(date, summary),
       source: 'statistical_fallback_error',
-      message: error?.message,
+      message: error.message || 'Network error contacting assessment server',
     };
   }
 };

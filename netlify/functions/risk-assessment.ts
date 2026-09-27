@@ -69,7 +69,14 @@ export const handler = async (event: any) => {
       };
     }
 
-    const ai = new GoogleGenAI({ apiKey });
+    const ai = new GoogleGenAI({
+      apiKey,
+      httpOptions: {
+        headers: {
+          Referer: event.headers?.referer || 'https://codfordcrimewatch.netlify.app/',
+        },
+      },
+    });
     const formattedDate = formatMonth(date);
 
     const prompt = `

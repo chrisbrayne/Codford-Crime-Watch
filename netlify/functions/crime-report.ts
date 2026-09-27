@@ -109,7 +109,14 @@ export const handler = async (event: any) => {
       };
     }
 
-    const ai = new GoogleGenAI({ apiKey });
+    const ai = new GoogleGenAI({
+      apiKey,
+      httpOptions: {
+        headers: {
+          Referer: event.headers?.referer || 'https://codfordcrimewatch.netlify.app/',
+        },
+      },
+    });
     const formattedDate = formatMonth(date);
     const incidentList = (crimes || []).slice(0, 50).map((c: any) => 
       `* ${c.category.replace(/-/g, ' ')} at ${c.location?.street?.name || 'Codford'}`
@@ -167,12 +174,27 @@ Output: Clean Markdown.
     };
   } catch (error: any) {
     console.error('Netlify function error in crime-report:', error);
+    const { date, summary, crimes } = JSON.parse(event.body || '{}');
+    const streetCounts: Record<string, number> = {};
+    if (Array.isArray(crimes)) {
+      crimes.forEach((c) => {
+        const street = (c.location?.street?.name || 'Unknown Location').replace('On or near ', '');
+        streetCounts[street] = (streetCounts[street] || 0) + 1;
+      });
+    }
+    const topStreets = Object.entries(streetCounts)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([name, count]) => `- **${name}**: ${count} ${count === 1 ? 'incident' : 'incidents'}`);
+
+    const fallback = generateStatisticalFallback(date || '', summary || { total: 0, byCategory: [], mostFrequentCategory: 'None' }, topStreets);
     return {
-      statusCode: 500,
+      statusCode: 200,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        error: error.message || 'Generation error',
-        source: 'statistical_fallback_error',
+        report: fallback,
+        source: 'statistical_fallback',
+        warning: `AI generation notice: ${error.message || 'Falling back to parish statistical report.'}`,
       }),
     };
   }
