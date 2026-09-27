@@ -36,8 +36,8 @@ const RiskAssessmentCard: React.FC<RiskAssessmentCardProps> = ({
   const metrics = calculateParishRiskMetrics(formattedDate, summary);
 
   const isCached = assessmentData?.source === 'cache';
-  const isAi = assessmentData?.source === 'gemini-3.8-flash' || assessmentData?.source === 'gemini-2.5-flash';
-  const modelName = assessmentData?.source === 'gemini-2.5-flash' ? 'Gemini 2.5' : 'Gemini 3.8';
+  const isAi = assessmentData?.source === 'gemini-3.8-flash' || assessmentData?.source === 'gemini-3.1-flash-lite';
+  const modelName = assessmentData?.source === 'gemini-3.1-flash-lite' ? 'Gemini 3.1' : 'Gemini 3.8';
   const isQuota = assessmentData?.isQuotaExhausted;
 
   return (

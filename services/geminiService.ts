@@ -3,7 +3,7 @@ import { generateDynamicRiskAssessment } from './riskCalculator';
 
 export interface CrimeReportResponse {
   report: string;
-  source: 'gemini-3.8-flash' | 'cache' | 'statistical_fallback' | 'statistical_fallback_quota' | 'statistical_fallback_error';
+  source: 'gemini-3.8-flash' | 'gemini-3.1-flash-lite' | 'cache' | 'statistical_fallback' | 'statistical_fallback_quota' | 'statistical_fallback_error';
   isQuotaExhausted?: boolean;
   message?: string;
   warning?: string;

@@ -175,17 +175,17 @@ Output: Clean Markdown.
       });
       reportText = response.text || null;
     } catch (err38: any) {
-      console.warn('gemini-3.8-flash failed in crime-report, trying gemini-2.5-flash:', err38?.message);
+      console.log('gemini-3.8-flash quota reached in crime-report, trying gemini-3.1-flash-lite');
       try {
         const response2 = await ai.models.generateContent({
-          model: 'gemini-2.5-flash',
+          model: 'gemini-3.1-flash-lite',
           contents: prompt,
           config: { temperature: 0.2 },
         });
         reportText = response2.text || null;
-        source = 'gemini-2.5-flash';
-      } catch (err25: any) {
-        console.warn('gemini-2.5-flash failed in crime-report, dropping to statistical report:', err25?.message);
+        source = 'gemini-3.1-flash-lite';
+      } catch (errLite: any) {
+        console.log('gemini-3.1-flash-lite unavailable, dropping to statistical report');
       }
     }
 

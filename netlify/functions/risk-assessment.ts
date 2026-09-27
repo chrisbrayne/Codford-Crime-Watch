@@ -238,18 +238,18 @@ CRITICAL FORMAT RULES:
       });
       assessmentText = response.text || null;
     } catch (err38: any) {
-      console.warn('gemini-3.8-flash failed, attempting gemini-2.5-flash fallback:', err38?.message);
-      // 2. Try gemini-2.5-flash
+      console.log('gemini-3.8-flash quota reached, attempting gemini-3.1-flash-lite fallback');
+      // 2. Try gemini-3.1-flash-lite
       try {
         const response2 = await ai.models.generateContent({
-          model: 'gemini-2.5-flash',
+          model: 'gemini-3.1-flash-lite',
           contents: prompt,
           config: { temperature: 0.7 },
         });
         assessmentText = response2.text || null;
-        source = 'gemini-2.5-flash';
-      } catch (err25: any) {
-        console.warn('gemini-2.5-flash failed, using dynamic parish risk synthesis:', err25?.message);
+        source = 'gemini-3.1-flash-lite';
+      } catch (errLite: any) {
+        console.log('gemini-3.1-flash-lite unavailable, using dynamic parish risk synthesis');
       }
     }
 

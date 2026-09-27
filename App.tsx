@@ -744,6 +744,11 @@ const App: React.FC = () => {
                             <Sparkles className="w-3 h-3 text-amber-300" /> Gemini 3.8
                           </span>
                         )}
+                        {reportSource === 'gemini-3.1-flash-lite' && (
+                          <span className="text-xs bg-white/20 text-white px-2 py-0.5 rounded-full flex items-center gap-1">
+                            <Sparkles className="w-3 h-3 text-amber-300" /> Gemini 3.1
+                          </span>
+                        )}
                         {reportSource === 'cache' && (
                           <span className="text-xs bg-emerald-400/25 text-emerald-100 px-2 py-0.5 rounded-full flex items-center gap-1 border border-emerald-300/30">
                             <Zap className="w-3 h-3 text-emerald-300" /> Cached (0 Tokens)
