@@ -3,6 +3,21 @@
   publish = "dist"
 
 [[redirects]]
+  from = "/api/crime-report"
+  to = "/.netlify/functions/crime-report"
+  status = 200
+
+[[redirects]]
+  from = "/api/risk-assessment"
+  to = "/.netlify/functions/risk-assessment"
+  status = 200
+
+[[redirects]]
+  from = "/api/diagnostics"
+  to = "/.netlify/functions/diagnostics"
+  status = 200
+
+[[redirects]]
   from = "/*"
   to = "/index.html"
   status = 200
