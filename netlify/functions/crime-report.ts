@@ -164,20 +164,42 @@ Tone: Professional, Objective, Local Council / Parish Watch style.
 Output: Clean Markdown.
 `;
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.8-flash',
-      contents: prompt,
-      config: { temperature: 0.2 },
-    });
+    let reportText: string | null = null;
+    let source = 'gemini-3.8-flash';
 
-    const reportText = response.text || generateStatisticalFallback(date, summary, topStreets);
+    try {
+      const response = await ai.models.generateContent({
+        model: 'gemini-3.8-flash',
+        contents: prompt,
+        config: { temperature: 0.2 },
+      });
+      reportText = response.text || null;
+    } catch (err38: any) {
+      console.warn('gemini-3.8-flash failed in crime-report, trying gemini-2.5-flash:', err38?.message);
+      try {
+        const response2 = await ai.models.generateContent({
+          model: 'gemini-2.5-flash',
+          contents: prompt,
+          config: { temperature: 0.2 },
+        });
+        reportText = response2.text || null;
+        source = 'gemini-2.5-flash';
+      } catch (err25: any) {
+        console.warn('gemini-2.5-flash failed in crime-report, dropping to statistical report:', err25?.message);
+      }
+    }
+
+    if (!reportText) {
+      reportText = generateStatisticalFallback(date, summary, topStreets);
+      source = 'statistical_fallback';
+    }
 
     return {
       statusCode: 200,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         report: reportText,
-        source: 'gemini-3.8-flash',
+        source,
       }),
     };
   } catch (error: any) {

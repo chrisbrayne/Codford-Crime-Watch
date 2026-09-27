@@ -84,24 +84,15 @@ ${advice}
 *(Note: Generated via Parish Statistical Analysis fallback mode.)*`;
 };
 
+import { generateDynamicRiskAssessment, calculateParishRiskMetrics } from './services/riskCalculator';
+
 // Generates reassuring risk assessment fallback starting with "Evening All" and ending with "Don't have nightmares!"
 const generateRiskAssessmentFallback = (
   date: string,
-  summary: CrimeSummary
+  summary: CrimeSummary,
+  seed = 0
 ): string => {
-  const formattedDate = formatMonth(date);
-  const total = summary.total;
-  const topCat = summary.mostFrequentCategory || 'minor incident';
-
-  return `Evening All,
-
-Taking a steady look at the numbers for ${formattedDate}, Codford recorded ${total} incident${total === 1 ? '' : 's'} (${topCat.toLowerCase()}). While any incident in our village is naturally noticeable, putting these numbers into true perspective gives a reassuring picture.
-
-Wiltshire consistently remains one of the safest police force areas anywhere in England and Wales, with an annual rate of around 56 incidents per 1,000 residents compared to the national average of approximately 89 per 1,000. In a small rural parish of about 700 people like Codford, one or two incidents can create statistical blips on paper, but they do not signify an escalation in everyday community risk. 
-
-Our actual day-to-day risk level remains very low. Staying neighbourly, keeping outbuildings and vehicles secured, and reporting any suspicious activity ensures Codford continues to be the peaceful Wylye Valley haven we all appreciate.
-
-Don't have nightmares!`;
+  return generateDynamicRiskAssessment(date, summary, seed);
 };
 
 async function startServer() {
@@ -317,9 +308,12 @@ Output: Clean Markdown.
       });
     }
 
+    const metrics = calculateParishRiskMetrics(date, summary);
+    const formattedDate = formatMonth(date);
+
     const client = getAiClient();
     if (!client) {
-      const fallback = generateRiskAssessmentFallback(date, summary);
+      const fallback = generateRiskAssessmentFallback(date, summary, forceRefresh ? Date.now() : 0);
       riskAssessmentCache.set(date, fallback);
       return res.json({
         assessment: fallback,
@@ -327,19 +321,29 @@ Output: Clean Markdown.
       });
     }
 
-    const formattedDate = formatMonth(date);
     const prompt = `
 You are a calm, experienced community safety advisor assessing crime in the rural Civil Parish of Codford, Wiltshire, UK.
 
-BENCHMARKS & CONTEXT:
-- Codford Parish Population: approx 700 residents (Wylye Valley rural community).
-- Wiltshire County Average: ~56 crimes per 1,000 residents per year (~4.7 per month per 1,000). Wiltshire consistently ranks among the top 5 safest police force areas in England and Wales.
-- England & Wales National Average: ~89 crimes per 1,000 residents per year (~7.4 per month per 1,000).
-- Codford Recorded Data for ${formattedDate}: Total of ${summary.total} incidents recorded by Wiltshire Police. Top category: ${summary.mostFrequentCategory}. Breakdown: ${summary.byCategory.map(c => `${c.name} (${c.value})`).join(', ') || 'None'}.
+DATASET & CALCULATED PARISH METRICS:
+- Period: ${formattedDate} (${metrics.durationMonths} month${metrics.durationMonths === 1 ? '' : 's'})
+- Total Incidents: ${metrics.totalCrimes}
+- Monthly Average: ${metrics.monthlyAverage} per month
+- Codford Annualized Crime Rate: ${metrics.codfordRatePerThousand} per 1,000 residents (Codford population: ~700)
+- Wiltshire County Average: ~56.2 per 1,000 residents per year (~4.7/month per 1,000). (Codford is ${metrics.percentLowerThanWiltshire}% lower than Wiltshire).
+- England & Wales National Average: ~89.3 per 1,000 residents per year (~7.4/month per 1,000). (Codford is ${metrics.percentLowerThanNational}% lower than national average).
+- Categorical Breakdown:
+  * Violent / Public Order: ${metrics.violentCount}
+  * Property / Acquisitive / Burglary / Vehicle: ${metrics.propertyCount}
+  * Anti-social behaviour: ${metrics.asbCount}
+  * Most frequent category: ${summary.mostFrequentCategory}
+  * Breakdown: ${summary.byCategory.map(c => `${c.name} (${c.value})`).join(', ') || 'None'}
 
 TASK:
-Provide a reasoned, objective, and reassuring assessment of the actual local crime risk level for Codford residents compared to Wiltshire county and national averages.
-Explain how small population numbers can make even 1 or 2 minor incidents appear magnified in percentage terms, but confirm that Codford remains a genuinely low-crime, peaceful rural setting.
+Provide a reasoned, objective, and reassuring assessment of the actual local crime risk level for Codford residents based on these exact figures.
+- Explicitly state whether this represents a 1-month snapshot or a ${metrics.durationMonths}-month trend.
+- CITE THE SPECIFIC NUMBERS: Mention the ${metrics.totalCrimes} incidents, the ${metrics.codfordRatePerThousand} per 1,000 rate, and comparison to Wiltshire (${metrics.percentLowerThanWiltshire}%) and National (${metrics.percentLowerThanNational}%).
+- Comment specifically on categories: ${metrics.violentCount} violent, ${metrics.propertyCount} property, ${metrics.asbCount} ASB.
+- Explain the small population effect (~700 people) and give grounded rural security advice.
 
 CRITICAL FORMAT RULES (STRICT COMPLIANCE REQUIRED):
 1. The response MUST BEGIN with the exact words: "Evening All" (a nod to PC George Dixon in Dixon of Dock Green).
@@ -348,15 +352,41 @@ CRITICAL FORMAT RULES (STRICT COMPLIANCE REQUIRED):
 `;
 
     try {
-      const response = await client.models.generateContent({
-        model: 'gemini-3.8-flash',
-        contents: prompt,
-        config: {
-          temperature: 0.3,
-        },
-      });
+      let responseText: string | null = null;
+      let source = 'gemini-3.8-flash';
 
-      let text = (response.text || '').trim();
+      try {
+        const response = await client.models.generateContent({
+          model: 'gemini-3.8-flash',
+          contents: prompt,
+          config: {
+            temperature: 0.7,
+          },
+        });
+        responseText = response.text || null;
+      } catch (err38) {
+        console.warn('gemini-3.8-flash failed in server, trying gemini-2.5-flash:', err38);
+        try {
+          const response2 = await client.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: prompt,
+            config: {
+              temperature: 0.7,
+            },
+          });
+          responseText = response2.text || null;
+          source = 'gemini-2.5-flash';
+        } catch (err25) {
+          console.warn('gemini-2.5-flash failed in server, using dynamic synthesis');
+        }
+      }
+
+      if (!responseText) {
+        responseText = generateRiskAssessmentFallback(date, summary, forceRefresh ? Date.now() : 0);
+        source = 'statistical_fallback';
+      }
+
+      let text = responseText.trim();
 
       // Enforce the required catchphrases if the model omitted or altered them slightly
       if (!text.toLowerCase().startsWith('evening all')) {
@@ -370,11 +400,11 @@ CRITICAL FORMAT RULES (STRICT COMPLIANCE REQUIRED):
 
       return res.json({
         assessment: text,
-        source: 'gemini-3.8-flash',
+        source,
       });
     } catch (error: any) {
       console.error('Gemini API Error in /api/risk-assessment:', error);
-      const fallback = generateRiskAssessmentFallback(date, summary);
+      const fallback = generateRiskAssessmentFallback(date, summary, forceRefresh ? Date.now() : 0);
 
       const errString = JSON.stringify(error, Object.getOwnPropertyNames(error)) + ' ' + (error?.message || '');
       const isQuotaError = 

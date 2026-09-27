@@ -3,6 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import { ShieldCheck, Scale, Loader2, RefreshCw, Copy, Check, Sparkles, Zap, AlertTriangle, TrendingDown } from 'lucide-react';
 import { RiskAssessmentResponse } from '../services/geminiService';
 import { CrimeSummary } from '../types';
+import { calculateParishRiskMetrics } from '../services/riskCalculator';
 
 interface RiskAssessmentCardProps {
   assessmentData: RiskAssessmentResponse | null;
@@ -31,16 +32,12 @@ const RiskAssessmentCard: React.FC<RiskAssessmentCardProps> = ({
     }
   };
 
-  // Calculations for benchmark indicators (Codford Parish ~700 population)
-  const parishPop = 700;
-  const codfordMonthlyPerThousand = summary.total > 0 ? Number(((summary.total / parishPop) * 1000).toFixed(1)) : 0;
-  // County average: ~56 annual / 12 = ~4.7 per 1,000/month
-  const wiltshireMonthlyPerThousand = 4.7;
-  // National average (England & Wales): ~89 annual / 12 = ~7.4 per 1,000/month
-  const nationalMonthlyPerThousand = 7.4;
+  // High-precision benchmark metrics considering duration and population
+  const metrics = calculateParishRiskMetrics(formattedDate, summary);
 
   const isCached = assessmentData?.source === 'cache';
-  const isAi = assessmentData?.source === 'gemini-3.8-flash';
+  const isAi = assessmentData?.source === 'gemini-3.8-flash' || assessmentData?.source === 'gemini-2.5-flash';
+  const modelName = assessmentData?.source === 'gemini-2.5-flash' ? 'Gemini 2.5' : 'Gemini 3.8';
   const isQuota = assessmentData?.isQuotaExhausted;
 
   return (
@@ -56,7 +53,7 @@ const RiskAssessmentCard: React.FC<RiskAssessmentCardProps> = ({
               <h2 className="font-bold text-lg text-white">Local Risk & Benchmark Assessment</h2>
               {isAi && (
                 <span className="text-xs bg-indigo-500/30 text-indigo-200 border border-indigo-400/30 px-2 py-0.5 rounded-full flex items-center gap-1">
-                  <Sparkles className="w-3 h-3 text-amber-300" /> Gemini AI
+                  <Sparkles className="w-3 h-3 text-amber-300" /> {modelName}
                 </span>
               )}
               {isCached && (
@@ -79,7 +76,7 @@ const RiskAssessmentCard: React.FC<RiskAssessmentCardProps> = ({
               onClick={onRefresh}
               disabled={cooldownSeconds > 0}
               className="flex items-center space-x-1.5 text-xs bg-white/10 hover:bg-white/20 disabled:opacity-50 text-white px-3 py-1.5 rounded-lg transition-colors border border-white/10"
-              title={cooldownSeconds > 0 ? `Cooldown: ${cooldownSeconds}s` : 'Re-assess crime risk with AI'}
+              title={cooldownSeconds > 0 ? `Cooldown: ${cooldownSeconds}s` : 'Re-assess crime risk'}
             >
               <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
               <span>{cooldownSeconds > 0 ? `${cooldownSeconds}s Cooldown` : 'Refresh Assessment'}</span>
@@ -104,21 +101,27 @@ const RiskAssessmentCard: React.FC<RiskAssessmentCardProps> = ({
         {/* Codford Metric */}
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
           <div className="flex items-center justify-between text-xs text-slate-500 font-medium mb-1">
-            <span>Codford Parish ({formattedDate})</span>
+            <span className="truncate max-w-[170px]" title={formattedDate}>Codford ({formattedDate})</span>
             <span className="text-blue-600 font-bold">Pop. ~700</span>
           </div>
           <div className="flex items-baseline space-x-2">
             <span className="text-2xl font-black text-slate-900">{summary.total}</span>
-            <span className="text-xs text-slate-500">incident{summary.total === 1 ? '' : 's'}</span>
+            <span className="text-xs text-slate-500">
+              total incident{summary.total === 1 ? '' : 's'} {metrics.durationMonths > 1 ? `(${metrics.durationMonths} mos)` : ''}
+            </span>
           </div>
           <div className="mt-2 text-xs text-slate-600 flex items-center justify-between">
-            <span>Monthly per 1,000:</span>
-            <span className="font-semibold text-slate-800">{codfordMonthlyPerThousand}</span>
+            <span>Rate per 1,000 (annualized):</span>
+            <span className="font-bold text-blue-700">{metrics.codfordRatePerThousand}</span>
           </div>
-          <div className="w-full bg-slate-100 rounded-full h-1.5 mt-1.5 overflow-hidden">
+          <div className="mt-1 text-xs text-slate-500 flex items-center justify-between">
+            <span>Monthly per 1,000:</span>
+            <span className="font-semibold text-slate-700">{metrics.codfordMonthlyPerThousand}</span>
+          </div>
+          <div className="w-full bg-slate-100 rounded-full h-1.5 mt-2 overflow-hidden">
             <div 
               className="bg-blue-600 h-1.5 rounded-full" 
-              style={{ width: `${Math.min(100, (codfordMonthlyPerThousand / nationalMonthlyPerThousand) * 100)}%` }}
+              style={{ width: `${Math.min(100, Math.max(5, (metrics.codfordRatePerThousand / metrics.nationalAnnualRate) * 100))}%` }}
             />
           </div>
         </div>
@@ -132,17 +135,23 @@ const RiskAssessmentCard: React.FC<RiskAssessmentCardProps> = ({
             </span>
           </div>
           <div className="flex items-baseline space-x-2">
-            <span className="text-2xl font-black text-slate-900">4.7</span>
-            <span className="text-xs text-slate-500">monthly / 1,000</span>
+            <span className="text-2xl font-black text-slate-900">56.2</span>
+            <span className="text-xs text-slate-500">annual / 1,000</span>
           </div>
           <div className="mt-2 text-xs text-slate-600 flex items-center justify-between">
-            <span>Annual benchmark:</span>
-            <span className="font-semibold text-slate-800">~56 / 1,000</span>
+            <span>Codford comparison:</span>
+            <span className="font-bold text-emerald-700">
+              {metrics.percentLowerThanWiltshire >= 0 ? `${metrics.percentLowerThanWiltshire}% lower` : `${Math.abs(metrics.percentLowerThanWiltshire)}% higher`}
+            </span>
           </div>
-          <div className="w-full bg-slate-100 rounded-full h-1.5 mt-1.5 overflow-hidden">
+          <div className="mt-1 text-xs text-slate-500 flex items-center justify-between">
+            <span>Monthly equivalent:</span>
+            <span className="font-semibold text-slate-700">~4.7 / 1,000</span>
+          </div>
+          <div className="w-full bg-slate-100 rounded-full h-1.5 mt-2 overflow-hidden">
             <div 
               className="bg-emerald-500 h-1.5 rounded-full" 
-              style={{ width: `${(wiltshireMonthlyPerThousand / nationalMonthlyPerThousand) * 100}%` }}
+              style={{ width: `${(metrics.wiltshireAnnualRate / metrics.nationalAnnualRate) * 100}%` }}
             />
           </div>
         </div>
@@ -154,14 +163,20 @@ const RiskAssessmentCard: React.FC<RiskAssessmentCardProps> = ({
             <span className="text-[10px] text-slate-400">National ONS</span>
           </div>
           <div className="flex items-baseline space-x-2">
-            <span className="text-2xl font-black text-slate-700">7.4</span>
-            <span className="text-xs text-slate-500">monthly / 1,000</span>
+            <span className="text-2xl font-black text-slate-700">89.3</span>
+            <span className="text-xs text-slate-500">annual / 1,000</span>
           </div>
           <div className="mt-2 text-xs text-slate-600 flex items-center justify-between">
-            <span>Annual benchmark:</span>
-            <span className="font-semibold text-slate-800">~89 / 1,000</span>
+            <span>Codford comparison:</span>
+            <span className="font-bold text-indigo-700">
+              {metrics.percentLowerThanNational >= 0 ? `${metrics.percentLowerThanNational}% lower` : `${Math.abs(metrics.percentLowerThanNational)}% higher`}
+            </span>
           </div>
-          <div className="w-full bg-slate-100 rounded-full h-1.5 mt-1.5 overflow-hidden">
+          <div className="mt-1 text-xs text-slate-500 flex items-center justify-between">
+            <span>Monthly equivalent:</span>
+            <span className="font-semibold text-slate-700">~7.4 / 1,000</span>
+          </div>
+          <div className="w-full bg-slate-100 rounded-full h-1.5 mt-2 overflow-hidden">
             <div className="bg-slate-400 h-1.5 rounded-full" style={{ width: '100%' }} />
           </div>
         </div>

@@ -1,4 +1,5 @@
 import { Crime, CrimeSummary } from '../types';
+import { generateDynamicRiskAssessment } from './riskCalculator';
 
 export interface CrimeReportResponse {
   report: string;
@@ -120,21 +121,10 @@ ${advice}
 
 const buildClientFallbackAssessment = (
   date: string,
-  summary: CrimeSummary
+  summary: CrimeSummary,
+  seed = 0
 ): string => {
-  const formattedDate = formatMonth(date);
-  const total = summary.total;
-  const topCat = summary.mostFrequentCategory || 'minor incident';
-
-  return `Evening All,
-
-Taking a steady look at the numbers for ${formattedDate}, Codford recorded ${total} incident${total === 1 ? '' : 's'} (${topCat.toLowerCase()}). While any incident in our village is naturally noticeable, putting these numbers into true perspective gives a reassuring picture.
-
-Wiltshire consistently remains one of the safest police force areas anywhere in England and Wales, with an annual rate of around 56 incidents per 1,000 residents compared to the national average of approximately 89 per 1,000. In a small rural parish of about 700 people like Codford, one or two incidents can create statistical blips on paper, but they do not signify an escalation in everyday community risk. 
-
-Our actual day-to-day risk level remains very low. Staying neighbourly, keeping outbuildings and vehicles secured, and reporting any suspicious activity ensures Codford continues to be the peaceful Wylye Valley haven we all appreciate.
-
-Don't have nightmares!`;
+  return generateDynamicRiskAssessment(date, summary, seed);
 };
 
 export const generateCrimeReport = async (
@@ -211,9 +201,11 @@ export const generateRiskAssessment = async (
 
     const data = await response.json();
 
+    const seed = forceRefresh ? Date.now() : 0;
+
     if (response.status === 429) {
       return {
-        assessment: data.assessment || buildClientFallbackAssessment(date, summary),
+        assessment: data.assessment || buildClientFallbackAssessment(date, summary, seed),
         source: 'statistical_fallback_quota',
         isQuotaExhausted: true,
         message: data.message || 'Rate limit reached. Displaying baseline risk benchmark.',
@@ -222,20 +214,20 @@ export const generateRiskAssessment = async (
 
     if (!response.ok) {
       return {
-        assessment: data.assessment || buildClientFallbackAssessment(date, summary),
+        assessment: data.assessment || buildClientFallbackAssessment(date, summary, seed),
         source: 'statistical_fallback_error',
         message: data.message || `Server returned status ${response.status}`,
       };
     }
 
     return {
-      assessment: data.assessment || buildClientFallbackAssessment(date, summary),
+      assessment: data.assessment || buildClientFallbackAssessment(date, summary, seed),
       source: data.source || 'gemini-3.8-flash',
     };
   } catch (error: any) {
     console.error('Failed to communicate with risk assessment API:', error);
     return {
-      assessment: buildClientFallbackAssessment(date, summary),
+      assessment: buildClientFallbackAssessment(date, summary, forceRefresh ? Date.now() : 0),
       source: 'statistical_fallback_error',
       message: error.message || 'Network error contacting assessment server',
     };
