@@ -1,6 +1,11 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { fetchCodfordBoundary } from './services/onsService';
-import { fetchAvailableDates, fetchCrimesInBoundary } from './services/policeService';
+import {
+  fetchAvailableDates,
+  fetchCrimesInBoundary,
+  fetchCrimesInDateRange,
+  getMonthsBetween,
+} from './services/policeService';
 import {
   generateCrimeReport,
   generateRiskAssessment,
@@ -18,6 +23,7 @@ import {
   ShieldAlert,
   MapPin,
   Calendar,
+  CalendarRange,
   Loader2,
   FileText,
   BarChart3,
@@ -35,9 +41,17 @@ import {
   Zap,
 } from 'lucide-react';
 
-// Helper to format YYYY-MM to MMM YYYY (e.g. "2024-03" -> "Mar 2024")
+// Helper to format YYYY-MM or YYYY-MM to YYYY-MM to readable string (e.g. "2024-03" -> "Mar 2024", "2023-09 to 2024-05" -> "Sep 2023 – May 2024")
 const formatDate = (dateStr: string) => {
   if (!dateStr) return '-';
+  if (dateStr.includes(' to ')) {
+    const [start, end] = dateStr.split(' to ');
+    const fmt = (s: string) => {
+      const [year, month] = s.split('-').map(Number);
+      return new Date(year, month - 1).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' });
+    };
+    return `${fmt(start)} – ${fmt(end)}`;
+  }
   const [year, month] = dateStr.split('-').map(Number);
   const date = new Date(year, month - 1);
   return date.toLocaleDateString('en-GB', { month: 'short', year: 'numeric' });
@@ -50,12 +64,19 @@ const App: React.FC = () => {
   
   const [boundary, setBoundary] = useState<GeoFeature | null>(null);
   const [availableDates, setAvailableDates] = useState<string[]>([]);
-  const [reportDate, setReportDate] = useState<string>('');
   
+  // Date Mode: 'single' (specific month) or 'range' (date span)
+  const [dateMode, setDateMode] = useState<'single' | 'range'>('single');
+  const [reportDate, setReportDate] = useState<string>('');
+  const [rangeStart, setRangeStart] = useState<string>('');
+  const [rangeEnd, setRangeEnd] = useState<string>('');
+  const [rangePreset, setRangePreset] = useState<'3months' | '6months' | '12months' | 'custom'>('6months');
+  const [loadProgress, setLoadProgress] = useState<{ loaded: number; total: number } | null>(null);
+
   const [crimes, setCrimes] = useState<Crime[]>([]);
   const [lastFetchedDate, setLastFetchedDate] = useState<string | null>(null);
 
-  // Month-by-month report and risk assessment storage (prevents redundant token use and avoids loops)
+  // Month-by-month and range report storage (prevents redundant token use and avoids loops)
   const [reportsByDate, setReportsByDate] = useState<Record<string, CrimeReportResponse>>({});
   const [riskAssessmentsByDate, setRiskAssessmentsByDate] = useState<Record<string, RiskAssessmentResponse>>({});
 
@@ -70,6 +91,29 @@ const App: React.FC = () => {
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [hoveredCrimeId, setHoveredCrimeId] = useState<number | null>(null);
   const [reportCopied, setReportCopied] = useState<boolean>(false);
+
+  // Determine active date key
+  const effectiveDate = useMemo(() => {
+    if (dateMode === 'single') {
+      return reportDate;
+    }
+    if (rangeStart && rangeEnd) {
+      const [start, end] = rangeStart <= rangeEnd ? [rangeStart, rangeEnd] : [rangeEnd, rangeStart];
+      return `${start} to ${end}`;
+    }
+    return reportDate;
+  }, [dateMode, reportDate, rangeStart, rangeEnd]);
+
+  // Determine active months to query
+  const activeMonths = useMemo(() => {
+    if (dateMode === 'single') {
+      return reportDate ? [reportDate] : [];
+    }
+    if (rangeStart && rangeEnd) {
+      return getMonthsBetween(rangeStart, rangeEnd, availableDates);
+    }
+    return reportDate ? [reportDate] : [];
+  }, [dateMode, reportDate, rangeStart, rangeEnd, availableDates]);
 
   // Cooldown countdown for rate-limit reset
   useEffect(() => {
@@ -97,9 +141,11 @@ const App: React.FC = () => {
         const dates = await fetchAvailableDates();
         setAvailableDates(dates);
         
-        // Set Default Date (Latest)
+        // Set Default Date (Latest) and Initial 6-Month Range
         if (dates.length > 0) {
           setReportDate(dates[0]);
+          setRangeEnd(dates[0]);
+          setRangeStart(dates[Math.min(5, dates.length - 1)]);
         }
 
       } catch (err: any) {
@@ -112,27 +158,39 @@ const App: React.FC = () => {
     initApp();
   }, []);
 
-  // 2. Fetch Crimes when Date or Boundary Changes
+  // 2. Fetch Crimes when Date Selection or Boundary Changes
   useEffect(() => {
     const loadCrimes = async () => {
-      if (!boundary || !reportDate) return;
+      if (!boundary || activeMonths.length === 0) return;
 
       try {
         setDataLoading(true);
-        const crimeData = await fetchCrimesInBoundary(boundary, reportDate);
-        setCrimes(crimeData);
-        setLastFetchedDate(reportDate);
+        if (dateMode === 'single') {
+          const crimeData = await fetchCrimesInBoundary(boundary, reportDate);
+          setCrimes(crimeData);
+          setLastFetchedDate(reportDate);
+        } else {
+          setLoadProgress({ loaded: 0, total: activeMonths.length });
+          const crimeData = await fetchCrimesInDateRange(
+            boundary,
+            activeMonths,
+            (loaded, total) => setLoadProgress({ loaded, total })
+          );
+          setCrimes(crimeData);
+          setLastFetchedDate(effectiveDate);
+        }
       } catch (err: any) {
-        console.error("Failed to load crimes for date", reportDate, err);
+        console.error("Failed to load crimes for", effectiveDate, err);
         setCrimes([]); 
-        setLastFetchedDate(reportDate);
+        setLastFetchedDate(effectiveDate);
       } finally {
         setDataLoading(false);
+        setLoadProgress(null);
       }
     };
 
     loadCrimes();
-  }, [boundary, reportDate]);
+  }, [boundary, dateMode, reportDate, activeMonths, effectiveDate]);
 
   // Calculate Summary
   const summary: CrimeSummary = useMemo(() => {
@@ -155,6 +213,32 @@ const App: React.FC = () => {
     };
   }, [crimes]);
 
+  // Calculate Monthly Incident Trend for Date Range Mode
+  const monthlyTrend = useMemo(() => {
+    if (dateMode !== 'range' || activeMonths.length <= 1) return [];
+
+    const countsByMonth: Record<string, number> = {};
+    activeMonths.forEach((m) => { countsByMonth[m] = 0; });
+
+    crimes.forEach((c) => {
+      if (countsByMonth[c.month] !== undefined) {
+        countsByMonth[c.month] += 1;
+      }
+    });
+
+    return [...activeMonths]
+      .sort((a, b) => a.localeCompare(b))
+      .map((m) => {
+        const [year, month] = m.split('-').map(Number);
+        const label = new Date(year, month - 1).toLocaleDateString('en-GB', { month: 'short', year: '2-digit' });
+        return {
+          month: m,
+          label,
+          count: countsByMonth[m] || 0,
+        };
+      });
+  }, [dateMode, activeMonths, crimes]);
+
   // Derived state for Filtering
   const filteredCrimes = useMemo(() => {
     if (selectedCategory === 'all') return crimes;
@@ -167,28 +251,28 @@ const App: React.FC = () => {
   }, [crimes]);
 
   // Current report objects for active date
-  const currentReport = reportDate ? reportsByDate[reportDate] : null;
+  const currentReport = effectiveDate ? reportsByDate[effectiveDate] : null;
   const aiReportText = currentReport?.report || null;
   const isQuotaExhausted = currentReport?.isQuotaExhausted || false;
   const reportSource = currentReport?.source || 'gemini-3.8-flash';
 
-  const currentRiskAssessment = reportDate ? riskAssessmentsByDate[reportDate] || null : null;
+  const currentRiskAssessment = effectiveDate ? riskAssessmentsByDate[effectiveDate] || null : null;
 
-  // Trigger Report & Risk Assessment Generation (Safe against re-render loops and quota exhaustion)
+  // Trigger Report & Risk Assessment Generation
   useEffect(() => {
     if (
       !initialLoading && 
       !dataLoading && 
       summary && 
-      reportDate && 
-      lastFetchedDate === reportDate
+      effectiveDate && 
+      lastFetchedDate === effectiveDate
     ) {
-      // 1. Monthly Crime Activity Report
-      if (!reportsByDate[reportDate] && !generatingReport) {
+      // 1. Monthly / Period Crime Activity Report
+      if (!reportsByDate[effectiveDate] && !generatingReport) {
         setGeneratingReport(true);
-        generateCrimeReport(reportDate, summary, crimes, false)
+        generateCrimeReport(effectiveDate, summary, crimes, false)
           .then(result => {
-            setReportsByDate(prev => ({ ...prev, [reportDate]: result }));
+            setReportsByDate(prev => ({ ...prev, [effectiveDate]: result }));
             if (result.isQuotaExhausted) {
               setCooldownSeconds(60);
             }
@@ -197,8 +281,8 @@ const App: React.FC = () => {
             console.error("Report generation failed:", err);
             setReportsByDate(prev => ({
               ...prev,
-              [reportDate]: {
-                report: `### ${summary.total} Incidents Recorded in ${formatDate(reportDate)}\n\n**Executive Summary:** Official Wiltshire Police records log **${summary.total}** incident${summary.total === 1 ? '' : 's'} for Codford Parish. Primary category: **${summary.mostFrequentCategory}**.\n\n*(Note: Instant parish statistics generated)*`,
+              [effectiveDate]: {
+                report: `### ${summary.total} Incidents Recorded in ${formatDate(effectiveDate)}\n\n**Executive Summary:** Official Wiltshire Police records log **${summary.total}** incident${summary.total === 1 ? '' : 's'} for Codford Parish. Primary category: **${summary.mostFrequentCategory}**.\n\n*(Note: Instant parish statistics generated)*`,
                 source: 'statistical_fallback_error',
                 message: err?.message || 'Generation error',
               }
@@ -208,11 +292,11 @@ const App: React.FC = () => {
       }
 
       // 2. Local Risk & Benchmark Assessment (Dixon of Dock Green & Crimewatch analysis)
-      if (!riskAssessmentsByDate[reportDate] && !generatingRiskAssessment) {
+      if (!riskAssessmentsByDate[effectiveDate] && !generatingRiskAssessment) {
         setGeneratingRiskAssessment(true);
-        generateRiskAssessment(reportDate, summary, false)
+        generateRiskAssessment(effectiveDate, summary, false)
           .then(result => {
-            setRiskAssessmentsByDate(prev => ({ ...prev, [reportDate]: result }));
+            setRiskAssessmentsByDate(prev => ({ ...prev, [effectiveDate]: result }));
             if (result.isQuotaExhausted) {
               setCooldownSeconds(60);
             }
@@ -221,8 +305,8 @@ const App: React.FC = () => {
             console.error("Risk assessment failed:", err);
             setRiskAssessmentsByDate(prev => ({
               ...prev,
-              [reportDate]: {
-                assessment: `Evening All,\n\nTaking a look at our figures for ${formatDate(reportDate)}, Codford recorded ${summary.total} incident(s). While any incident in our village is noticeable, Wiltshire remains one of the safest police force areas in England (~56 per 1,000 annually vs ~89 nationally). Everyday crime risk in Codford remains exceptionally low.\n\nDon't have nightmares!`,
+              [effectiveDate]: {
+                assessment: `Evening All,\n\nTaking a look at our figures for ${formatDate(effectiveDate)}, Codford recorded ${summary.total} incident(s). While any incident in our village is noticeable, Wiltshire remains one of the safest police force areas in England (~56 per 1,000 annually vs ~89 nationally). Everyday crime risk in Codford remains exceptionally low.\n\nDon't have nightmares!`,
                 source: 'statistical_fallback_error',
                 message: err?.message || 'Risk assessment error',
               }
@@ -236,7 +320,7 @@ const App: React.FC = () => {
     dataLoading,
     crimes,
     summary,
-    reportDate,
+    effectiveDate,
     reportsByDate,
     riskAssessmentsByDate,
     generatingReport,
@@ -247,9 +331,9 @@ const App: React.FC = () => {
   const handleRegenerateReport = () => {
     if (generatingReport || cooldownSeconds > 0) return;
     setGeneratingReport(true);
-    generateCrimeReport(reportDate, summary, crimes, true)
+    generateCrimeReport(effectiveDate, summary, crimes, true)
       .then(result => {
-        setReportsByDate(prev => ({ ...prev, [reportDate]: result }));
+        setReportsByDate(prev => ({ ...prev, [effectiveDate]: result }));
         if (result.isQuotaExhausted) {
           setCooldownSeconds(60);
         }
@@ -263,9 +347,9 @@ const App: React.FC = () => {
   const handleRefreshRiskAssessment = () => {
     if (generatingRiskAssessment || cooldownSeconds > 0) return;
     setGeneratingRiskAssessment(true);
-    generateRiskAssessment(reportDate, summary, true)
+    generateRiskAssessment(effectiveDate, summary, true)
       .then(result => {
-        setRiskAssessmentsByDate(prev => ({ ...prev, [reportDate]: result }));
+        setRiskAssessmentsByDate(prev => ({ ...prev, [effectiveDate]: result }));
         if (result.isQuotaExhausted) {
           setCooldownSeconds(60);
         }
@@ -287,6 +371,37 @@ const App: React.FC = () => {
   const handleDateChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     setReportDate(e.target.value);
     setSelectedCategory('all');
+  };
+
+  const handlePresetSelect = (preset: '3months' | '6months' | '12months') => {
+    setRangePreset(preset);
+    if (availableDates.length === 0) return;
+    const end = availableDates[0];
+    let count = 3;
+    if (preset === '6months') count = 6;
+    if (preset === '12months') count = 12;
+    const start = availableDates[Math.min(count - 1, availableDates.length - 1)];
+    setRangeEnd(end);
+    setRangeStart(start);
+    setSelectedCategory('all');
+  };
+
+  const handleRangeStartChange = (val: string) => {
+    setRangeStart(val);
+    setRangePreset('custom');
+    setSelectedCategory('all');
+    if (val > rangeEnd) {
+      setRangeEnd(val);
+    }
+  };
+
+  const handleRangeEndChange = (val: string) => {
+    setRangeEnd(val);
+    setRangePreset('custom');
+    setSelectedCategory('all');
+    if (val < rangeStart) {
+      setRangeStart(val);
+    }
   };
 
   if (error) {
@@ -322,10 +437,10 @@ const App: React.FC = () => {
                 <MapPin className="w-4 h-4" />
                 <span>Codford, Wiltshire</span>
              </div>
-             {reportDate && (
+             {effectiveDate && (
               <div className="hidden sm:flex items-center space-x-1">
                   <Calendar className="w-4 h-4" />
-                  <span>{formatDate(reportDate)}</span>
+                  <span>{formatDate(effectiveDate)}</span>
               </div>
              )}
 
@@ -393,61 +508,184 @@ const App: React.FC = () => {
           <div className="space-y-8">
             
             {/* Filter & Date Controls */}
-            <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex flex-col sm:flex-row justify-between items-center gap-4">
-               <h3 className="text-lg font-semibold text-slate-800 flex items-center space-x-2">
-                  <BarChart3 className="w-5 h-5 text-slate-500" />
-                  <span>Report Controls</span>
-                </h3>
-                
-                <div className="flex flex-col sm:flex-row gap-4 w-full sm:w-auto">
-                    {/* Date Picker */}
+            <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-200 flex flex-col gap-4">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+                <div className="flex items-center space-x-2">
+                  <BarChart3 className="w-5 h-5 text-blue-600" />
+                  <h3 className="text-base sm:text-lg font-semibold text-slate-800">Parish Report Parameters</h3>
+                  <span className="hidden sm:inline-block text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full font-medium">
+                    {dateMode === 'single' ? 'Single Month' : `${activeMonths.length} Months Span`}
+                  </span>
+                </div>
+
+                {/* Mode Switcher: Specific Month vs Date Range */}
+                <div className="inline-flex bg-slate-100 p-1 rounded-lg border border-slate-200 self-start md:self-auto text-xs sm:text-sm font-medium">
+                  <button
+                    onClick={() => { setDateMode('single'); setSelectedCategory('all'); }}
+                    className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-md transition-all ${
+                      dateMode === 'single'
+                        ? 'bg-white text-slate-900 shadow-sm font-semibold'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    <Calendar className="w-4 h-4 text-blue-600" />
+                    <span>Specific Month</span>
+                  </button>
+                  <button
+                    onClick={() => { setDateMode('range'); setSelectedCategory('all'); }}
+                    className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-md transition-all ${
+                      dateMode === 'range'
+                        ? 'bg-white text-slate-900 shadow-sm font-semibold'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    <CalendarRange className="w-4 h-4 text-indigo-600" />
+                    <span>Date Range</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Controls Row */}
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                {dateMode === 'single' ? (
+                  /* Single Month Picker */
+                  <div className="flex flex-wrap items-center gap-3">
                     <div className="flex items-center space-x-2">
                       <label htmlFor="date-select" className="text-sm font-medium text-slate-600">Month:</label>
                       <div className="relative">
-                         <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                         <select 
-                            id="date-select"
-                            value={reportDate}
-                            onChange={handleDateChange}
-                            disabled={dataLoading}
-                            className="pl-9 pr-8 py-2 bg-slate-50 border border-slate-300 text-slate-700 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full sm:w-48 disabled:opacity-50"
-                         >
-                            {availableDates.map(date => (
-                               <option key={date} value={date}>{formatDate(date)}</option>
-                            ))}
-                         </select>
+                        <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                        <select 
+                          id="date-select"
+                          value={reportDate}
+                          onChange={handleDateChange}
+                          disabled={dataLoading}
+                          className="pl-9 pr-8 py-2 bg-slate-50 border border-slate-300 text-slate-700 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-48 disabled:opacity-50"
+                        >
+                          {availableDates.map(date => (
+                            <option key={date} value={date}>{formatDate(date)}</option>
+                          ))}
+                        </select>
                       </div>
                     </div>
-
-                    {/* Category Filter */}
-                    <div className="flex items-center space-x-2">
-                       <label htmlFor="category-select" className="text-sm font-medium text-slate-600">Type:</label>
-                       <div className="relative">
-                           <Filter className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                           <select 
-                              id="category-select"
-                              value={selectedCategory}
-                              onChange={(e) => setSelectedCategory(e.target.value)}
-                              disabled={dataLoading || crimes.length === 0}
-                              className="pl-9 pr-8 py-2 bg-slate-50 border border-slate-300 text-slate-700 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full sm:w-48 disabled:opacity-50"
-                           >
-                              <option value="all">All Categories</option>
-                              {uniqueCategories.map(cat => (
-                                 <option key={cat} value={cat}>
-                                   {cat.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
-                                 </option>
-                              ))}
-                           </select>
-                       </div>
+                  </div>
+                ) : (
+                  /* Date Range Picker */
+                  <div className="flex flex-col sm:flex-row flex-wrap items-start sm:items-center gap-3">
+                    {/* Quick Presets */}
+                    <div className="flex items-center space-x-1 bg-slate-50 p-1 rounded-lg border border-slate-200 text-xs font-medium">
+                      <button
+                        onClick={() => handlePresetSelect('3months')}
+                        className={`px-2.5 py-1 rounded transition-colors ${
+                          rangePreset === '3months' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-200'
+                        }`}
+                      >
+                        Last 3M
+                      </button>
+                      <button
+                        onClick={() => handlePresetSelect('6months')}
+                        className={`px-2.5 py-1 rounded transition-colors ${
+                          rangePreset === '6months' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-200'
+                        }`}
+                      >
+                        Last 6M
+                      </button>
+                      <button
+                        onClick={() => handlePresetSelect('12months')}
+                        className={`px-2.5 py-1 rounded transition-colors ${
+                          rangePreset === '12months' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-200'
+                        }`}
+                      >
+                        Last 12M
+                      </button>
                     </div>
+
+                    {/* From Month */}
+                    <div className="flex items-center space-x-2">
+                      <label htmlFor="range-start-select" className="text-sm font-medium text-slate-600">From:</label>
+                      <select
+                        id="range-start-select"
+                        value={rangeStart}
+                        onChange={(e) => handleRangeStartChange(e.target.value)}
+                        disabled={dataLoading}
+                        className="py-1.5 px-3 bg-slate-50 border border-slate-300 text-slate-700 text-sm rounded-lg focus:ring-indigo-500 focus:border-indigo-500 block disabled:opacity-50"
+                      >
+                        {[...availableDates].reverse().map(date => (
+                          <option key={`start-${date}`} value={date}>{formatDate(date)}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* To Month */}
+                    <div className="flex items-center space-x-2">
+                      <label htmlFor="range-end-select" className="text-sm font-medium text-slate-600">To:</label>
+                      <select
+                        id="range-end-select"
+                        value={rangeEnd}
+                        onChange={(e) => handleRangeEndChange(e.target.value)}
+                        disabled={dataLoading}
+                        className="py-1.5 px-3 bg-slate-50 border border-slate-300 text-slate-700 text-sm rounded-lg focus:ring-indigo-500 focus:border-indigo-500 block disabled:opacity-50"
+                      >
+                        {availableDates.map(date => (
+                          <option key={`end-${date}`} value={date}>{formatDate(date)}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                )}
+
+                {/* Right side: Category Filter */}
+                <div className="flex items-center space-x-2 self-start lg:self-auto">
+                  <label htmlFor="category-select" className="text-sm font-medium text-slate-600">Category:</label>
+                  <div className="relative">
+                    <Filter className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                    <select 
+                      id="category-select"
+                      value={selectedCategory}
+                      onChange={(e) => setSelectedCategory(e.target.value)}
+                      disabled={dataLoading || crimes.length === 0}
+                      className="pl-9 pr-8 py-2 bg-slate-50 border border-slate-300 text-slate-700 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full sm:w-48 disabled:opacity-50"
+                    >
+                      <option value="all">All Categories ({crimes.length})</option>
+                      {uniqueCategories.map(cat => (
+                        <option key={cat} value={cat}>
+                          {cat.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
+              </div>
+
+              {/* Context bar for Date Range */}
+              {dateMode === 'range' && (
+                <div className="text-xs text-slate-500 bg-slate-50 px-3 py-1.5 rounded-md border border-slate-200 flex flex-wrap items-center justify-between gap-2">
+                  <span>
+                    Viewing <strong>{activeMonths.length} months</strong>: {formatDate(effectiveDate)} across Codford Parish boundary.
+                  </span>
+                  <span>
+                    Aggregated official data: <strong>{crimes.length} incident{crimes.length === 1 ? '' : 's'}</strong> logged.
+                  </span>
+                </div>
+              )}
             </div>
 
             {dataLoading ? (
-               <div className="flex flex-col items-center justify-center py-20 space-y-4">
-                  <Loader2 className="w-8 h-8 text-blue-600 animate-spin" />
-                  <p className="text-slate-500">Retrieving crime data for {formatDate(reportDate)}...</p>
-               </div>
+              <div className="flex flex-col items-center justify-center py-20 space-y-4">
+                <Loader2 className="w-8 h-8 text-blue-600 animate-spin" />
+                <p className="text-slate-600 font-medium">
+                  {loadProgress && loadProgress.total > 1
+                    ? `Retrieving crime data across ${loadProgress.total} months (${loadProgress.loaded}/${loadProgress.total} loaded)...`
+                    : `Retrieving crime data for ${formatDate(effectiveDate)}...`}
+                </p>
+                {loadProgress && loadProgress.total > 1 && (
+                  <div className="w-64 bg-slate-200 rounded-full h-2 overflow-hidden">
+                    <div 
+                      className="bg-indigo-600 h-2 rounded-full transition-all duration-300"
+                      style={{ width: `${Math.round((loadProgress.loaded / loadProgress.total) * 100)}%` }}
+                    />
+                  </div>
+                )}
+              </div>
             ) : (
                 <>
                 {/* Top Stats Cards */}
@@ -480,7 +718,7 @@ const App: React.FC = () => {
                     </div>
                     <div>
                       <p className="text-sm text-slate-500 font-medium">Reporting Period</p>
-                      <p className="text-xl font-bold text-slate-900">{formatDate(reportDate)}</p>
+                      <p className="text-xl font-bold text-slate-900">{formatDate(effectiveDate)}</p>
                     </div>
                   </div>
                 </div>
@@ -492,7 +730,7 @@ const App: React.FC = () => {
                   onRefresh={handleRefreshRiskAssessment}
                   cooldownSeconds={cooldownSeconds}
                   summary={summary}
-                  formattedDate={formatDate(reportDate)}
+                  formattedDate={formatDate(effectiveDate)}
                 />
 
                 {/* AI Activity Summary Section */}
@@ -613,16 +851,11 @@ const App: React.FC = () => {
                   </div>
 
                   <div className="space-y-4">
-                     <div className="flex items-center justify-between">
-                        <h3 className="text-lg font-semibold text-slate-800 flex items-center space-x-2">
-                          <BarChart3 className="w-5 h-5 text-slate-500" />
-                          <span>Category Breakdown</span>
-                        </h3>
-                        <span className="text-xs text-slate-400 bg-slate-100 px-2 py-1 rounded">
-                          Total: {summary.total}
-                        </span>
-                     </div>
-                    <CrimeChart summary={summary} />
+                    <CrimeChart 
+                      summary={summary} 
+                      monthlyTrend={monthlyTrend} 
+                      isRangeMode={dateMode === 'range'} 
+                    />
                   </div>
                 </div>
 

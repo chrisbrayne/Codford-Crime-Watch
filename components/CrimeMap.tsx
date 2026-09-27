@@ -89,9 +89,18 @@ const CrimeMap: React.FC<CrimeMapProps> = ({ boundary, crimes, hoveredCrimeId })
           fillOpacity: 0.9
         });
 
+        const formatMonthBadge = (m: string) => {
+          if (!m) return '';
+          const [y, mon] = m.split('-').map(Number);
+          return new Date(y, mon - 1).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' });
+        };
+
         marker.bindTooltip(`
           <div class="font-sans text-xs">
-            <strong class="block mb-1 text-slate-800">${crime.category.replace(/-/g, ' ')}</strong>
+            <div class="flex items-center justify-between gap-2 mb-1">
+              <strong class="text-slate-800">${crime.category.replace(/-/g, ' ')}</strong>
+              ${crime.month ? `<span class="bg-blue-100 text-blue-700 px-1 py-0.5 rounded text-[10px] font-semibold">${formatMonthBadge(crime.month)}</span>` : ''}
+            </div>
             <span class="text-slate-600">${crime.location.street.name}</span><br/>
             <em class="text-slate-500">${crime.outcome_status?.category || 'Status unavailable'}</em>
           </div>

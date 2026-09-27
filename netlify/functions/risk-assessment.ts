@@ -13,6 +13,14 @@ interface CrimeSummary {
 
 const formatMonth = (dateStr: string): string => {
   if (!dateStr) return '-';
+  if (dateStr.includes(' to ')) {
+    const [start, end] = dateStr.split(' to ');
+    const fmt = (s: string) => {
+      const [year, month] = s.split('-').map(Number);
+      return new Date(year, month - 1).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+    };
+    return `${fmt(start)} to ${fmt(end)}`;
+  }
   const [year, month] = dateStr.split('-').map(Number);
   const date = new Date(year, month - 1);
   return date.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });

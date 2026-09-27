@@ -82,6 +82,72 @@ const generateFallbackDates = (): string[] => {
     return dates;
 };
 
+export const getMonthsBetween = (startDate: string, endDate: string, availableDates?: string[]): string[] => {
+  if (!startDate || !endDate) return startDate ? [startDate] : endDate ? [endDate] : [];
+  const [minDate, maxDate] = startDate <= endDate ? [startDate, endDate] : [endDate, startDate];
+  
+  if (availableDates && availableDates.length > 0) {
+    const filtered = availableDates
+      .filter(d => d >= minDate && d <= maxDate)
+      .sort((a, b) => b.localeCompare(a));
+    if (filtered.length > 0) return filtered;
+  }
+  
+  const months: string[] = [];
+  const [startYear, startMonth] = minDate.split('-').map(Number);
+  const [endYear, endMonth] = maxDate.split('-').map(Number);
+  
+  let current = new Date(startYear, startMonth - 1, 1);
+  const end = new Date(endYear, endMonth - 1, 1);
+  
+  while (current <= end) {
+    months.push(current.toISOString().slice(0, 7));
+    current.setMonth(current.getMonth() + 1);
+  }
+  
+  return months.sort((a, b) => b.localeCompare(a));
+};
+
+export const fetchCrimesInDateRange = async (
+  boundary: GeoFeature,
+  months: string[],
+  onProgress?: (loaded: number, total: number) => void
+): Promise<Crime[]> => {
+  if (months.length === 0) return [];
+  if (months.length === 1) return fetchCrimesInBoundary(boundary, months[0]);
+
+  let loaded = 0;
+  const results = await Promise.all(
+    months.map(async (month) => {
+      try {
+        const monthCrimes = await fetchCrimesInBoundary(boundary, month);
+        loaded += 1;
+        onProgress?.(loaded, months.length);
+        return monthCrimes;
+      } catch (err) {
+        console.warn(`Failed to fetch crimes for month ${month}:`, err);
+        loaded += 1;
+        onProgress?.(loaded, months.length);
+        return [] as Crime[];
+      }
+    })
+  );
+
+  const seenIds = new Set<number>();
+  const combined: Crime[] = [];
+
+  for (const monthList of results) {
+    for (const crime of monthList) {
+      if (!seenIds.has(crime.id)) {
+        seenIds.add(crime.id);
+        combined.push(crime);
+      }
+    }
+  }
+
+  return combined.sort((a, b) => b.month.localeCompare(a.month));
+};
+
 export const fetchCrimesInBoundary = async (boundary: GeoFeature, date: string): Promise<Crime[]> => {
   const polyString = convertGeoJSONToPolyString(boundary);
   
